@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model KfSyncState {
+  id        String   @id @default(cuid())
+  openKfid  String   @unique
+  token     String
+  cursor    String
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+}
+
+model Session {
+  id             String   @id @default(cuid())
+  openKfid        String
+  externalUserId  String
+  lastMsgAt       DateTime?
+  lastMsgPreview  String?
+  unreadCount     Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  messages Message[]
+
+  @@unique([openKfid, externalUserId])
+  @@index([openKfid, lastMsgAt])
+}
+
+model Message {
+  id             String   @id @default(cuid())
+  msgId          String   @unique
+  openKfid       String
+  externalUserId String
+  origin         String?
+  msgType        String
+  sendTime       DateTime
+  payload        Json
+
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([openKfid, externalUserId, sendTime])
+}
