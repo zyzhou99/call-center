@@ -37,3 +37,16 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# runtime
+node_modules
+.next
+*.log
+
+# env
+.env
+.env.*
+!.env.example
+
+# sqlite db
+prisma/*.db
