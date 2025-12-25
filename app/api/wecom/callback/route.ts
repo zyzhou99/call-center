@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     // ✅ 用你项目里已经跑通 kf/accounts 的 token 方法
     const accessToken = await getWecomAccessToken();
 
-    // 1) 拉消息（cursor 先空，POC 阶段 OK）
+    // 1) 拉消息
     const syncResp = await fetch(
       `https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${encodeURIComponent(
         accessToken
@@ -86,14 +86,42 @@ export async function POST(req: Request) {
       return new NextResponse("success", { status: 200 });
     }
 
-    const list = syncData?.msg_list || [];
-    const lastText = [...list]
-      .reverse()
-      .find((m: any) => m.msgtype === "text" && m.text?.content && m.external_userid);
+    const list: any[] = syncData?.msg_list || [];
 
-    if (!lastText) return new NextResponse("success", { status: 200 });
+    // 打个日志看一下实际顺序
+    console.log(
+      "sync_msg list (short):",
+      list.map((m: any) => ({
+        msgid: m.msgid,
+        send_time: m.send_time,
+        origin: m.origin,
+        msgtype: m.msgtype,
+        text: m.text?.content,
+        external_userid: m.external_userid,
+      }))
+    );
 
-    const touser = lastText.external_userid; // ✅ send_msg 需要 touser
+    // 过滤出「外部客户发来的文本消息」
+    const candidates = list.filter(
+      (m: any) =>
+        m.msgtype === "text" &&
+        m.text?.content &&
+        m.external_userid &&
+        m.origin === 3 // 3 = external user
+    );
+
+    if (candidates.length === 0) {
+      console.log("no customer text messages");
+      return new NextResponse("success", { status: 200 });
+    }
+
+    // ✅ 不管顺序如何，都选 send_time 最大的那一条（最新）
+    const lastText = candidates.reduce((latest: any, cur: any) => {
+      if (!latest) return cur;
+      return cur.send_time > latest.send_time ? cur : latest;
+    }, null as any);
+
+    const touser = lastText.external_userid;
     const content = lastText.text.content;
 
     // 2) 回消息

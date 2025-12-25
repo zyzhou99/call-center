@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -13,6 +10,25 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// -------- Enums --------
+
+enum Channel {
+  wechat
+  whatsapp
+  line
+  webchat
+  email
+  phone
+}
+
+enum MessageDirection {
+  in   // 客户发给客服
+  out  // 客服发给客户
+}
+
+// -------- Models --------
+
+// 用来存每个 OpenKfId 的同步状态（你之前就有的）
 model KfSyncState {
   id        String   @id @default(cuid())
   openKfid  String   @unique
@@ -22,36 +38,60 @@ model KfSyncState {
   createdAt DateTime @default(now())
 }
 
+// 一条「会话」= 一个 openKfid + 一个 externalUserId
+// 对应前端的 Conversation
 model Session {
   id             String   @id @default(cuid())
-  openKfid        String
-  externalUserId  String
-  lastMsgAt       DateTime?
-  lastMsgPreview  String?
-  unreadCount     Int      @default(0)
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
 
-  messages Message[]
+  // 企业微信维度
+  openKfid       String
+  externalUserId String
 
+  // UI 需要的字段
+  displayName    String?          // 对话顶部 / 列表里显示的名字
+  channel        Channel @default(wechat) // wechat / whatsapp / line ...
+  lastMsgAt      DateTime?        // 用来排序（最新消息时间）
+  lastMsgPreview String?          // 列表里显示的最后一条摘要
+  unreadCount    Int      @default(0)
+
+  // 你说的 VIP 号（用户进来之前输入的）
+  vipNumber      String?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  messages       Message[]
+
+  // 一个 openKfid + externalUserId 只对应一条会话
   @@unique([openKfid, externalUserId])
+
+  // 快速按客服 + 最新时间排序
   @@index([openKfid, lastMsgAt])
 }
 
+// 单条消息，对应前端的 Message
 model Message {
   id             String   @id @default(cuid())
+
+  // 企业微信原始字段
   msgId          String   @unique
   openKfid       String
   externalUserId String
-  origin         String?
-  msgType        String
-  sendTime       DateTime
-  payload        Json
+  origin         String?  // 来源标记（比如 "wecom"），可选
+  msgType        String   // text / image / event ...
+  sendTime       DateTime // 企业微信那边的发送时间
+  payload        Json     // 原始完整 payload，方便以后调试、扩展
 
-  sessionId String
-  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  // UI 需要的字段
+  direction      MessageDirection // in / out，决定气泡朝向
+  text           String?          // 纯文本内容（从 payload 里抽出来）
 
-  createdAt DateTime @default(now())
+  // 关联到会话
+  sessionId      String
+  session        Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
+  createdAt      DateTime @default(now())
+
+  // 常用查询索引
   @@index([openKfid, externalUserId, sendTime])
 }
