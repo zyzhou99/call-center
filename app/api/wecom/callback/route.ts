@@ -1,7 +1,9 @@
+// app/api/wecom/callback/route.ts
 export const runtime = "nodejs";
 
 import { NextResponse } from "next/server";
-import { getWecomAccessToken } from "@/lib/wecom/token"; // ✅ 关键：把它 import 进来
+import { getWecomAccessToken } from "@/lib/wecom/token";
+import { prisma } from "@/lib/db";
 
 const WXBizMsgCrypt = require("wxcrypt");
 const { x2o } = require("wxcrypt");
@@ -32,11 +34,13 @@ export async function GET(req: Request) {
 
     return new NextResponse(plain, { status: 200 });
   } catch (e: any) {
-    return new NextResponse(`fail: ${e?.message || String(e)}`, { status: 400 });
+    return new NextResponse(`fail: ${e?.message || String(e)}`, {
+      status: 400,
+    });
   }
 }
 
-// 收到事件通知：自动拉消息 + 自动回一条（echo）
+// 收到事件通知：拉消息 + 写入 Session 表 + 自动回一条
 export async function POST(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -46,20 +50,27 @@ export async function POST(req: Request) {
 
     const rawXml = await req.text();
     const crypt = getCrypt();
-    const decryptedXml = crypt.decryptMsg(msg_signature, timestamp, nonce, rawXml);
+    const decryptedXml = crypt.decryptMsg(
+      msg_signature,
+      timestamp,
+      nonce,
+      rawXml
+    );
     const obj = x2o(decryptedXml);
 
     console.log("✅ callback decrypted:", JSON.stringify(obj, null, 2));
 
     const token = obj?.xml?.Token;
     const open_kfid = obj?.xml?.OpenKfId;
+    const eventCreateTime = Number(obj?.xml?.CreateTime || "0");
 
     // 不是微信客服事件就忽略
     if (!token || !open_kfid) {
       return new NextResponse("success", { status: 200 });
     }
 
-    // ✅ 用你项目里已经跑通 kf/accounts 的 token 方法
+    const openKfid = String(open_kfid);
+
     const accessToken = await getWecomAccessToken();
 
     // 1) 拉消息
@@ -74,7 +85,7 @@ export async function POST(req: Request) {
           token,
           open_kfid,
           cursor: "",
-          limit: 20,
+          limit: 50, // 最近一小段就够了
         }),
       }
     );
@@ -88,7 +99,6 @@ export async function POST(req: Request) {
 
     const list: any[] = syncData?.msg_list || [];
 
-    // 打个日志看一下实际顺序
     console.log(
       "sync_msg list (short):",
       list.map((m: any) => ({
@@ -101,8 +111,8 @@ export async function POST(req: Request) {
       }))
     );
 
-    // 过滤出「外部客户发来的文本消息」
-    const candidates = list.filter(
+    // 先拿出所有「外部客户的文本消息」
+    const baseCandidates = list.filter(
       (m: any) =>
         m.msgtype === "text" &&
         m.text?.content &&
@@ -110,12 +120,23 @@ export async function POST(req: Request) {
         m.origin === 3 // 3 = external user
     );
 
+    // 再根据这次事件的 CreateTime 做一次“时间过滤”
+    // 只保留 send_time >= eventCreateTime - 5 秒 的
+    const candidates = baseCandidates.filter((m: any) => {
+      if (!eventCreateTime || typeof m.send_time !== "number") return true;
+      // 给一点余量，防止时间戳有1~2秒偏差
+      return m.send_time >= eventCreateTime - 5;
+    });
+
     if (candidates.length === 0) {
-      console.log("no customer text messages");
+      console.log(
+        "no customer text messages for this event, baseCandidates =",
+        baseCandidates.length
+      );
       return new NextResponse("success", { status: 200 });
     }
 
-    // ✅ 不管顺序如何，都选 send_time 最大的那一条（最新）
+    // 在“本次事件范围内”的消息里，选 send_time 最大的那一条
     const lastText = candidates.reduce((latest: any, cur: any) => {
       if (!latest) return cur;
       return cur.send_time > latest.send_time ? cur : latest;
@@ -123,8 +144,46 @@ export async function POST(req: Request) {
 
     const touser = lastText.external_userid;
     const content = lastText.text.content;
+    const sendTime =
+      typeof lastText.send_time === "number"
+        ? new Date(lastText.send_time * 1000)
+        : new Date();
 
-    // 2) 回消息
+    // 2) 写入 / 更新 Session 表
+    try {
+      await prisma.session.upsert({
+        where: {
+          openKfid_externalUserId: {
+            openKfid,
+            externalUserId: touser,
+          },
+        },
+        update: {
+          lastMsgAt: sendTime,
+          lastMsgPreview: content,
+          unreadCount: { increment: 1 },
+        },
+        create: {
+          openKfid,
+          externalUserId: touser,
+          displayName: touser,
+          lastMsgAt: sendTime,
+          lastMsgPreview: content,
+          unreadCount: 1,
+          channel: "wechat",
+        },
+      });
+
+      console.log(
+        "✅ session upserted:",
+        JSON.stringify({ openKfid, touser, content }, null, 2)
+      );
+    } catch (dbErr) {
+      console.error("❌ failed to upsert session:", dbErr);
+      // 不影响回调返回
+    }
+
+    // 3) 回消息（echo）
     const sendResp = await fetch(
       `https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${encodeURIComponent(
         accessToken
@@ -147,7 +206,7 @@ export async function POST(req: Request) {
     return new NextResponse("success", { status: 200 });
   } catch (e: any) {
     console.error("callback bot error:", e);
-    // 企微要求快速返回 success，否则会重试
     return new NextResponse("success", { status: 200 });
   }
 }
+

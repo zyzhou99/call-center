@@ -48,7 +48,9 @@ export async function GET(req: Request) {
     const accessToken = await getWecomAccessToken();
 
     const resp = await fetch(
-      `https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${encodeURIComponent(accessToken)}`,
+      `https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${encodeURIComponent(
+        accessToken
+      )}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -97,39 +99,63 @@ export async function GET(req: Request) {
 
         if (!msgId || !externalUserId) continue;
 
-        // session：按 (openKfid, externalUserId) 聚合
+        // 先从消息里抽一份摘要出来
+        const preview = extractPreview(m);
+
+        // 判断这条消息是「客户发给客服」还是「客服发给客户」
+        // 企业微信里 origin = 3 通常表示外部联系人
+        const isInbound =
+          m.origin === 3 ||
+          m.origin === "3" ||
+          (!!m.external_userid && !m.servicer_userid);
+
+        // 从 payload 里抽一份干净的 text 文本出来，用于前端 UI
+        let text: string | null = null;
+        if (m.msgtype === "text" && m.text?.content) {
+          text = m.text.content;
+        }
+
+        // 保存 / 更新会话（Session）
         const session = await tx.session.upsert({
           where: {
             openKfid_externalUserId: { openKfid: open_kfid, externalUserId },
           },
           update: {
             lastMsgAt: sendTime,
-            lastMsgPreview: extractPreview(m),
+            lastMsgPreview: preview,
+            // 这里暂时不处理 unreadCount，后面你想做也可以加
           },
           create: {
             openKfid: open_kfid,
             externalUserId,
             lastMsgAt: sendTime,
-            lastMsgPreview: extractPreview(m),
+            lastMsgPreview: preview,
           },
         });
 
         try {
+          const payload = m; // 整条原始消息 JSON 存进去，方便以后调试
+
           await tx.message.create({
             data: {
               msgId,
               openKfid: open_kfid,
               externalUserId,
-              origin,
+              origin: origin ?? null,
               msgType,
               sendTime,
-              payload: m,
+              payload,
+
+              // ✅ 新 schema 必填字段
+              direction: isInbound ? "in" : "out",
+              text,
+
               sessionId: session.id,
             },
           });
           inserted += 1;
         } catch (e: any) {
-          // Prisma unique constraint violation
+          // Prisma unique constraint violation（重复 msgId）
           if (e?.code === "P2002") duplicated += 1;
           else throw e;
         }

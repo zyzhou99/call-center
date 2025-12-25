@@ -14,26 +14,43 @@ export async function GET(req: NextRequest) {
       );
     }
 
+    console.log("[/api/wecom/sessions] open_kfid =", openKfid);
+
     const sessions = await prisma.session.findMany({
       where: { openKfid },
       orderBy: { lastMsgAt: "desc" },
     });
 
+    console.log(
+      "[/api/wecom/sessions] sessions count =",
+      sessions.length
+    );
+
     const conversations = sessions.map((s) => ({
-      // ✅ UI 里用 externalUserId 当作会话 id
-      id: s.externalUserId,
-      displayName: s.displayName ?? s.externalUserId ?? "Guest",
+      // 用 externalUserId 当作会话 id（UI 用这个字段）
+      id: s.externalUserId ?? "",
+      displayName: s.displayName || s.externalUserId || "Guest",
       lastMessagePreview: s.lastMsgPreview ?? "",
       unreadCount: s.unreadCount ?? 0,
       channel: (s.channel as any) ?? "wechat",
     }));
 
     return NextResponse.json({ ok: true, conversations });
-  } catch (e) {
-    console.error("wecom sessions error", e);
+  } catch (err: any) {
+    console.error("[/api/wecom/sessions] error:", err);
+
+    const message =
+      err?.message ||
+      (typeof err === "string" ? err : JSON.stringify(err));
+
     return NextResponse.json(
-      { ok: false, error: "internal_error" },
+      {
+        ok: false,
+        error: "internal_error",
+        detail: message,
+      },
       { status: 500 }
     );
   }
 }
+
