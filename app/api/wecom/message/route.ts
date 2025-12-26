@@ -1,4 +1,4 @@
-// app/api/wecom/messages/route.ts
+// app/api/wecom/message/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
@@ -38,15 +38,15 @@ export async function GET(req: NextRequest) {
         m.sendTime instanceof Date ? m.sendTime : new Date(m.sendTime as any);
       const ts = sendTime.getTime();
 
+      const payload = (m.payload ?? {}) as any;
       const text =
         (m.text as string | null) ??
-        ((m.payload as any)?.text as string | undefined) ??
+        (payload?.text as string | undefined) ??
         "";
 
       return {
         id: m.id,
-        // ✅ 前端会用 externalUserId 当成 conversationId
-        conversationId: externalUserId,
+        conversationId: externalUserId, // 前端会话 ID = external_userid
         direction: m.direction === "out" ? "out" : "in",
         text,
         timestamp: ts,
@@ -63,10 +63,10 @@ export async function GET(req: NextRequest) {
     });
 
     return NextResponse.json({ ok: true, messages: uiMessages });
-  } catch (e) {
-    console.error("wecom messages error", e);
+  } catch (e: any) {
+    console.error("wecom message error", e);
     return NextResponse.json(
-      { ok: false, error: "internal_error" },
+      { ok: false, error: "internal_error", detail: e?.message ?? String(e) },
       { status: 500 }
     );
   }

@@ -9,7 +9,6 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    // 简单保护
     const adminToken = req.headers.get("x-admin-token");
     if (adminToken !== ADMIN_TOKEN) {
       return NextResponse.json(
@@ -21,7 +20,7 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const openKfid = searchParams.get("open_kfid");
     const takeParam = searchParams.get("take");
-    const take = takeParam ? Math.min(Number(takeParam) || 20, 100) : 20;
+    const take = takeParam ? Math.min(Number(takeParam) || 50, 200) : 50;
 
     if (!openKfid) {
       return NextResponse.json(
@@ -32,35 +31,38 @@ export async function GET(
 
     const externalUserId = params.id; // 路径里的 :id = external_userid
 
-    const rows = await prisma.message.findMany({
+    // ✅ 从“最新的”开始取，再反转成时间正序给前端
+    const rowsDesc = await prisma.message.findMany({
       where: {
         openKfid,
         externalUserId,
       },
-      orderBy: { sendTime: "asc" }, // 时间顺序
+      orderBy: { sendTime: "desc" }, // 最新的在前
       take,
     });
 
-    // 映射成前端用的 Message 类型
+    const rows = rowsDesc.slice().reverse(); // 转成从旧到新
+
     const messages = rows.map((m) => {
-      // 文本优先从 m.text 拿，兜底从 payload 里拿
       let text = (m as any).text as string | null;
       if (!text) {
         const payload = m.payload as any;
         if (m.msgType === "text") {
-          text = payload?.text ?? "";
+          // 保险兜底一下
+          text = payload?.text ?? payload?.content ?? "";
         } else {
           text = `[${m.msgType}]`;
         }
       }
 
-      const sendDate = new Date(m.sendTime);
+      const sendDate =
+        m.sendTime instanceof Date ? m.sendTime : new Date(m.sendTime as any);
 
       return {
         id: m.id,
-        conversationId: externalUserId, // 前端这边就用 external_userid 当 conversationId
+        conversationId: externalUserId,
         direction: (m as any).direction === "out" ? "out" : "in",
-        text,
+        text: text ?? "",
         timestamp: sendDate.getTime(),
         timeLabel: sendDate.toLocaleTimeString("en-US", {
           hour: "numeric",
