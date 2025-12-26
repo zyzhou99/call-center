@@ -70,12 +70,14 @@ export async function POST(req: Request) {
       return new NextResponse("success", { status: 200 });
     }
 
-    const syncToken = String(tokenFromEvent);
+    // 这里先转成字符串备用（下面 sync_msg 用）
     const openKfid = String(open_kfid);
 
     const accessToken = await getWecomAccessToken();
 
-    // 1) 通过 sync_msg 拉这次事件相关的消息
+    // 1) 通过 sync_msg 拉「最近一批」消息
+    //    ⚠️ 粗暴版：不再使用 token / cursor，只靠 open_kfid + limit，
+    //    这样每次都会拿到最近一段历史里所有消息，再用 msgId 去重。
     const syncResp = await fetch(
       `https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${encodeURIComponent(
         accessToken
@@ -84,10 +86,8 @@ export async function POST(req: Request) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          open_kfid,
-          token: syncToken,
-          cursor: "",
-          limit: 100, // 一般一次不会很多，100 足够
+          open_kfid: openKfid,
+          limit: 1000, // 你现在数据量很小，1000 足够覆盖所有最近历史
         }),
       }
     );
@@ -123,7 +123,7 @@ export async function POST(req: Request) {
         }
       | null = null;
 
-    // 2) 把这次拉到的消息全部同步进 Session / Message 表
+    // 2) 把这次拉到的消息同步进 Session / Message 表
     for (const m of list) {
       const msgId = String(m.msgid || "");
       const externalUserId = m.external_userid
