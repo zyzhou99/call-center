@@ -92,8 +92,24 @@ function ConversationRow({ conversation, isActive, onClick, messages }: Conversa
   const vipColor = getVIPTierColor(conversation.vipTier);
 
   const lastMessage = getLastMessage(messages);
-  const preview = getMessagePreview(lastMessage);
-  const timeLabel = lastMessage?.timestamp ? getTimeLabel(lastMessage.timestamp) : conversation.lastMessageAtLabel;
+  const previewFromMessages = getMessagePreview(lastMessage);
+
+  // ✅ 优先用后端 /api/wecom/sessions 返回的 lastMessagePreview
+  //    （可以反映“没点进去时”的最新一条）
+  //    如果没有，再用本地 messagesState 算出来的 preview
+  const lastMessagePreview =
+    typeof (conversation as any).lastMessagePreview === "string"
+      ? (conversation as any).lastMessagePreview.trim()
+      : "";
+
+  const preview =
+    lastMessagePreview.length > 0
+      ? lastMessagePreview
+      : previewFromMessages;
+
+  const timeLabel = lastMessage?.timestamp
+    ? getTimeLabel(lastMessage.timestamp)
+    : conversation.lastMessageAtLabel;
 
   return (
     <button
@@ -111,7 +127,10 @@ function ConversationRow({ conversation, isActive, onClick, messages }: Conversa
         <div className="absolute left-0 top-0 bottom-0 w-1 bg-[var(--accent)]" />
       )}
       <div className="flex-shrink-0">
-        <div className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-medium" style={{ backgroundColor: 'var(--avatar-bg)', color: 'var(--accent)' }}>
+        <div
+          className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-medium"
+          style={{ backgroundColor: 'var(--avatar-bg)', color: 'var(--accent)' }}
+        >
           {initials}
         </div>
       </div>
@@ -135,7 +154,10 @@ function ConversationRow({ conversation, isActive, onClick, messages }: Conversa
         </div>
         {conversation.room && (
           <div className="mb-1">
-            <span className="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded" style={{ backgroundColor: 'var(--divider)', color: 'var(--text-secondary)' }}>
+            <span
+              className="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded"
+              style={{ backgroundColor: 'var(--divider)', color: 'var(--text-secondary)' }}
+            >
               {conversation.room}
             </span>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { ProtectedRoute } from "@/components/protected-route";
 import { AppShell, AppHeader } from "@/components/app-shell";
 import { LeftChannelRail } from "@/components/left-channel-rail";
@@ -32,8 +32,7 @@ function InboxContent() {
   const [searchQuery, setSearchQuery] = useState("");
 
   // mock 会话
-  const [mockConvs, setMockConvs] =
-    useState<Conversation[]>(mockConversations);
+  const [mockConvs, setMockConvs] = useState<Conversation[]>(mockConversations);
 
   // 真实 wechat 会话
   const [wecomConversations, setWecomConversations] = useState<Conversation[]>(
@@ -44,9 +43,12 @@ function InboxContent() {
   const [messagesState, setMessagesState] =
     useState<Record<string, Message[]>>(mockMessages);
 
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(
-    mockConversations[0]?.id || null
-  );
+  const [activeConversationId, setActiveConversationId] =
+    useState<string | null>(mockConversations[0]?.id || null);
+
+  // 记录：服务器返回的「总未读数」快照 & 本地「已读基线」
+  const wecomServerUnreadsRef = useRef<Record<string, number>>({});
+  const wecomUnreadBaseRef = useRef<Record<string, number>>({});
 
   // 初始化：从 localStorage 恢复上次的 channel
   useEffect(() => {
@@ -72,9 +74,12 @@ function InboxContent() {
     }
   };
 
-  // 加载企业微信会话列表（页面加载时跑一次）
+  // 加载 + 轮询企业微信会话列表
   useEffect(() => {
-    (async () => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+
+    const fetchSessions = async () => {
       try {
         const resp = await fetch(
           `/api/wecom/sessions?open_kfid=${encodeURIComponent(OPEN_KFID)}`,
@@ -83,32 +88,86 @@ function InboxContent() {
           }
         );
         const data = await resp.json();
+        if (!data?.ok || stopped) return;
 
-        if (data?.ok) {
-          const convs: Conversation[] = (data.conversations || []).map(
-            (c: any) => ({
-              id: c.id, // external_userid
-              channel: "wechat",
-              displayName: c.displayName || c.id,
-              lastMessagePreview: c.lastMessagePreview || "",
-              unreadCount: Number(c.unreadCount || 0),
-            })
-          );
-          setWecomConversations(convs);
+        const serverConvs: Conversation[] = (data.conversations || []).map(
+          (c: any) => ({
+            id: c.id, // externalUserId
+            channel: "wechat",
+            displayName: c.displayName || c.id,
+            lastMessagePreview: c.lastMessagePreview || "",
+            // 这里的 unreadCount 是「服务器记录的总未读数」
+            unreadCount: Number(c.unreadCount || 0),
+          })
+        );
 
-          // 如果当前没有 activeConversationId，就默认选第一个微信会话
-          setActiveConversationId((prev) => prev || convs[0]?.id || prev);
-        }
+        // 计算服务器未读快照 & 本地基线
+        const serverUnreads: Record<string, number> = {};
+        const base: Record<string, number> = {
+          ...wecomUnreadBaseRef.current,
+        };
+
+        serverConvs.forEach((conv) => {
+          const rawUnread = conv.unreadCount || 0;
+          serverUnreads[conv.id] = rawUnread;
+
+          if (conv.id === activeConversationId) {
+            // 当前正在看的会话：认为这些都已读
+            base[conv.id] = rawUnread;
+          } else if (!(conv.id in base)) {
+            // 第一次看到这个会话：默认认为历史消息都已读
+            base[conv.id] = rawUnread;
+          }
+        });
+
+        wecomServerUnreadsRef.current = serverUnreads;
+        wecomUnreadBaseRef.current = base;
+
+        // 计算「真正要显示的小红点数量」= 总未读 - 基线
+        const convList: Conversation[] = serverConvs.map((conv) => {
+          const rawUnread = serverUnreads[conv.id] || 0;
+          const baseUnread = base[conv.id] || 0;
+          const effectiveUnread = Math.max(0, rawUnread - baseUnread);
+
+          const unreadCount =
+            activeConversationId && conv.id === activeConversationId
+              ? 0
+              : effectiveUnread;
+
+          return {
+            ...conv,
+            unreadCount,
+          };
+        });
+
+        setWecomConversations(convList);
+
+        // 没有选中会话时，默认选第一个 wechat 会话
+        setActiveConversationId((prev) => prev || convList[0]?.id || prev);
       } catch (e) {
         console.error("load wecom sessions failed:", e);
       }
-    })();
-  }, []);
+    };
+
+    // 初始化先拉一次
+    fetchSessions();
+
+    // 只要左侧包含微信（all / wechat），就轮询更新会话列表
+    if (activeChannel === "wechat" || activeChannel === "all") {
+      timer = setInterval(fetchSessions, 5000); // 每 5 秒拉一次
+    }
+
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [activeChannel, activeConversationId]);
 
   // 当前要展示的会话源
   const sourceConversations = useMemo(() => {
     if (activeChannel === "wechat") return wecomConversations;
-    if (activeChannel === "all") return [...wecomConversations, ...mockConvs];
+    if (activeChannel === "all")
+      return [...wecomConversations, ...mockConvs];
     return mockConvs;
   }, [activeChannel, wecomConversations, mockConvs]);
 
@@ -188,7 +247,13 @@ function InboxContent() {
           }));
         }
 
-        // 把未读清 0（只改前端）
+        // 标记为已读：更新本地已读基线 + 立即把 UI 未读清零
+        const serverUnreads = wecomServerUnreadsRef.current;
+        wecomUnreadBaseRef.current = {
+          ...wecomUnreadBaseRef.current,
+          [conversationId]: serverUnreads[conversationId] || 0,
+        };
+
         setWecomConversations((prev) =>
           prev.map((c) =>
             c.id === conversationId ? { ...c, unreadCount: 0 } : c
@@ -238,6 +303,7 @@ function InboxContent() {
 
     // 先拉一次
     fetchMessages();
+
     // 然后每 4 秒拉一次
     const timer = setInterval(fetchMessages, 4000);
 
@@ -250,7 +316,6 @@ function InboxContent() {
   // 发消息
   const handleSendMessage = async (text: string) => {
     if (!activeConversationId) return;
-
     const conversationId = activeConversationId;
 
     // 先乐观更新 UI
@@ -282,8 +347,7 @@ function InboxContent() {
             content: text,
           }),
         });
-        // 真正写入 DB 后，轮询会把当前会话的最新消息再覆盖一遍，
-        // 这里不需要额外处理
+        // 真正写入 DB 后，轮询会把当前会话的最新消息再覆盖一遍
       } catch (e) {
         console.error("send wecom message failed:", e);
       }

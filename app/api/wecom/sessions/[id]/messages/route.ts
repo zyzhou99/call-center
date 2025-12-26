@@ -42,39 +42,47 @@ export async function GET(
     });
 
     const rows = rowsDesc.slice().reverse(); // 转成从旧到新
-
+    
     const messages = rows.map((m) => {
-      let text = (m as any).text as string | null;
-      if (!text) {
-        const payload = m.payload as any;
-        if (m.msgType === "text") {
-          // 保险兜底一下
-          text = payload?.text ?? payload?.content ?? "";
-        } else {
-          text = `[${m.msgType}]`;
-        }
-      }
+  // 文本优先从 m.text 拿，兜底从 payload 里拿
+  let text = (m as any).text as string | null;
+  if (!text) {
+    const payload = m.payload as any;
+    if (m.msgType === "text") {
+      text = payload?.text ?? "";
+    } else {
+      text = `[${m.msgType}]`;
+    }
+  }
 
-      const sendDate =
-        m.sendTime instanceof Date ? m.sendTime : new Date(m.sendTime as any);
+  const sendDate = new Date(m.sendTime);
 
-      return {
-        id: m.id,
-        conversationId: externalUserId,
-        direction: (m as any).direction === "out" ? "out" : "in",
-        text: text ?? "",
-        timestamp: sendDate.getTime(),
-        timeLabel: sendDate.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
-        dateLabel: sendDate.toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }),
-      };
-    });
+  // ✅ 统一用北京时间显示
+  const timeLabel = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false, // 24 小时制：14:02
+  }).format(sendDate);
+
+  const dateLabel = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(sendDate);
+
+  return {
+    id: m.id,
+    conversationId: externalUserId, // 前端用 external_userid 当 conversationId
+    direction: (m as any).direction === "out" ? "out" : "in",
+    text,
+    timestamp: sendDate.getTime(), // 这个给前端算相对时间用，保持不变
+    timeLabel,
+    dateLabel,
+  };
+});
+
 
     return NextResponse.json({ ok: true, messages });
   } catch (e) {
