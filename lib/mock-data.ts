@@ -10,7 +10,7 @@ export const mockConversations: Conversation[] = [
     id: '1',
     channel: 'whatsapp', // 原来是 wechat，改成非 wechat 渠道
     displayName: 'Jayvion Simon',
-    lastMessagePreview: 'Looks clean and fresh UI.😃',
+    lastMessagePreview: 'No preference, please recommend...',
     lastMessageAtLabel: '3 days',
     unreadCount: 1,
     vip: true,
@@ -130,7 +130,7 @@ export const mockMessages: Record<string, Message[]> = {
       conversationId: '1',
       direction: 'in',
       text:
-        'Hey John, I am looking for the best admin template. Could you please help me to find it out?😃',
+        'Hi, can you help me arrange a car pickup at 8:10 PM and a dinner reservation for 2 at 8:30?',
       timeLabel: '4:02 PM',
       dateLabel: new Date(NOW - 3 * DAY).toLocaleDateString('en-US', {
         year: 'numeric',
@@ -143,7 +143,7 @@ export const mockMessages: Record<string, Message[]> = {
       id: 'm2',
       conversationId: '1',
       direction: 'out',
-      text: 'Stack admin is the responsive bootstrap 4 admin template.',
+      text: 'Good evening. Absolutely, any restaurant preference, and should we bill everything to your room?',
       timeLabel: '4:02 PM',
       timestamp: NOW - 3 * DAY + 60_000,
     },
@@ -151,7 +151,7 @@ export const mockMessages: Record<string, Message[]> = {
       id: 'm3',
       conversationId: '1',
       direction: 'in',
-      text: 'Looks clean and fresh UI.😃',
+      text: 'No preference, please recommend something upscale and yes, bill to the room.',
       timeLabel: '4:02 PM',
       timestamp: NOW - 3 * DAY + 120_000,
     },
@@ -266,7 +266,7 @@ export const mockMessages: Record<string, Message[]> = {
       id: 'm13',
       conversationId: '6',
       direction: 'in',
-      text: 'Could you recommend a good restaurant nearby?',
+      text: 'Book room from Dec 24 - Jan 2',
       timeLabel: '6:10 PM',
       dateLabel: new Date(NOW - 10 * HOUR).toLocaleDateString('en-US', {
         year: 'numeric',
@@ -280,7 +280,7 @@ export const mockMessages: Record<string, Message[]> = {
       conversationId: '6',
       direction: 'out',
       text:
-        'Certainly! We have an excellent Italian restaurant just 5 minutes away. I can make a reservation for you.',
+        'Prepare wine in the room',
       timeLabel: '6:12 PM',
       timestamp: NOW - 10 * HOUR + 120_000,
     },
