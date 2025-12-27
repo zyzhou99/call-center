@@ -5,12 +5,15 @@ import { MessageCircle, Phone, Mail, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface LeftChannelRailProps {
-  activeChannel: Channel | 'all';
-  onChannelSelect: (channel: Channel | 'all') => void;
+  activeChannel: Channel;
+  onChannelSelect: (channel: Channel) => void;
   unreadCounts: Record<Channel, number>;
 }
 
-const channelConfig: Record<Channel, { icon: React.ComponentType<{ className?: string }>, label: string }> = {
+const channelConfig: Record<
+  Channel,
+  { icon: React.ComponentType<{ className?: string }>; label: string }
+> = {
   wechat: { icon: MessageCircle, label: 'WeChat' },
   whatsapp: { icon: MessageSquare, label: 'WhatsApp' },
   line: { icon: MessageCircle, label: 'Line' },
@@ -19,7 +22,11 @@ const channelConfig: Record<Channel, { icon: React.ComponentType<{ className?: s
   phone: { icon: Phone, label: 'Phone' },
 };
 
-export function LeftChannelRail({ activeChannel, onChannelSelect, unreadCounts }: LeftChannelRailProps) {
+export function LeftChannelRail({
+  activeChannel,
+  onChannelSelect,
+  unreadCounts,
+}: LeftChannelRailProps) {
   return (
     <div className="w-[72px] bg-[#1f1f1f] flex flex-col items-center py-6 border-r border-black/20">
       <div className="mb-8">
@@ -29,14 +36,6 @@ export function LeftChannelRail({ activeChannel, onChannelSelect, unreadCounts }
       </div>
 
       <div className="flex-1 flex flex-col items-center space-y-2 w-full px-2">
-        <ChannelIconButton
-          icon={MessageCircle}
-          label="All"
-          isActive={activeChannel === 'all'}
-          onClick={() => onChannelSelect('all')}
-          unreadCount={Object.values(unreadCounts).reduce((a, b) => a + b, 0)}
-        />
-
         {(Object.keys(channelConfig) as Channel[]).map((channel) => {
           const config = channelConfig[channel];
           return (
@@ -63,7 +62,13 @@ interface ChannelIconButtonProps {
   unreadCount?: number;
 }
 
-function ChannelIconButton({ icon: Icon, label, isActive, onClick, unreadCount = 0 }: ChannelIconButtonProps) {
+function ChannelIconButton({
+  icon: Icon,
+  label,
+  isActive,
+  onClick,
+  unreadCount = 0,
+}: ChannelIconButtonProps) {
   return (
     <button
       onClick={onClick}
