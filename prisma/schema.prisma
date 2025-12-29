@@ -10,23 +10,7 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// -------- Enums --------
-
-enum Channel {
-  wechat
-  whatsapp
-  line
-  webchat
-  email
-  phone
-}
-
-enum MessageDirection {
-  in   // 客户发给客服
-  out  // 客服发给客户
-}
-
-// -------- Models --------
+// -------- Models & Enums（DB 里不用 enum / Json，全部用 String） --------
 
 // 用来存每个 OpenKfId 的同步状态（你之前就有的）
 model KfSyncState {
@@ -38,7 +22,35 @@ model KfSyncState {
   createdAt DateTime @default(now())
 }
 
-// 一条「会话」= 一个 openKfid + 一个 externalUserId
+// VIP guest 基础信息（假的也可以放这里，方便 H5 测试）
+model VipGuest {
+  id            String   @id @default(cuid())
+
+  // 用户在 H5 页面输入的 VIP number（唯一）
+  vipNumber     String   @unique
+
+  fullName      String
+  preferredName String?
+
+  // 原来是 VipTier enum，这里用 String 存，比如 "Diamond" / "Gold"
+  tier          String?
+
+  // 这些字段对应你 mockProfiles 里的信息，方便右侧 GuestProfilePanel 展示
+  room          String?
+  checkInDate   DateTime?
+  checkOutDate  DateTime?
+  segment       String?  // Business / Leisure ...
+  statusLabel   String?  // Check in / Check out 等
+  notes         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 一个 VIP 可以有多次会话记录
+  sessions      Session[]
+}
+
+// 一条「会话」= 一个 openKfId + 一个 externalUserId
 // 对应前端的 Conversation
 model Session {
   id             String   @id @default(cuid())
@@ -49,13 +61,20 @@ model Session {
 
   // UI 需要的字段
   displayName    String?          // 对话顶部 / 列表里显示的名字
-  channel        Channel @default(wechat) // wechat / whatsapp / line ...
+
+  // 原来是 Channel enum，这里用 String 存，比如 "wechat" / "whatsapp"
+  channel        String  @default("wechat") // wechat / whatsapp / line ...
+
   lastMsgAt      DateTime?        // 用来排序（最新消息时间）
   lastMsgPreview String?          // 列表里显示的最后一条摘要
   unreadCount    Int      @default(0)
 
-  // 你说的 VIP 号（用户进来之前输入的）
+  // 用户在 H5 页面输入的 VIP 号（冗余一份，方便查）
   vipNumber      String?
+
+  // 关联到 VipGuest（如果能匹配上）
+  vipGuestId     String?
+  vipGuest       VipGuest? @relation(fields: [vipGuestId], references: [id])
 
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -67,6 +86,9 @@ model Session {
 
   // 快速按客服 + 最新时间排序
   @@index([openKfid, lastMsgAt])
+
+  // 按 VIP 号查会话（后面 H5 用得到）
+  @@index([vipNumber])
 }
 
 // 单条消息，对应前端的 Message
@@ -80,11 +102,13 @@ model Message {
   origin         String?  // 来源标记（比如 "wecom"），可选
   msgType        String   // text / image / event ...
   sendTime       DateTime // 企业微信那边的发送时间
-  payload        Json     // 原始完整 payload，方便以后调试、扩展
 
-  // UI 需要的字段
-  direction      MessageDirection // in / out，决定气泡朝向
-  text           String?          // 纯文本内容（从 payload 里抽出来）
+  // 原来是 Json，这里用 String 存 JSON 字符串就好
+  payload        String   // 比如存 JSON.stringify(payload)
+
+  // 原来是 MessageDirection enum，这里用 String 存 "in" / "out"
+  direction      String          // "in" / "out"，决定气泡朝向
+  text           String?         // 纯文本内容（从 payload 里抽出来）
 
   // 关联到会话
   sessionId      String
