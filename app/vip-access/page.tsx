@@ -54,24 +54,32 @@ export default function VipAccessPage() {
   const showSuccess = result?.ok;
   const showError = result && !result.ok;
 
+  // ✅ 名字用“后端已经更新后的数据”为准，避免和数据库不一致
   const successName =
     result?.vipGuest?.preferredName ||
     result?.vipGuest?.fullName ||
-    preferredName ||
     "";
 
+  // ✅ 点击“GO TO CUSTOMER SERVICE”
   const handleGoToChat = () => {
-    if (result?.kfUrl) {
+    if (!result) return;
+
+    if (result.kfUrl) {
+      // 生产：跳真实企微客服链接
       window.location.href = result.kfUrl;
-    } else if (result?.sessionId) {
-      // 本地：带着 sessionId 跳转到 inbox
+      return;
+    }
+
+    if (result.sessionId) {
+      // 本地开发：带 sessionId 跳到 inbox
       window.location.href = `/inbox?sessionId=${encodeURIComponent(
         result.sessionId
       )}`;
-    } else {
-      // fallback：没有 sessionId 就普通跳
-      window.location.href = "/inbox";
+      return;
     }
+
+    // 兜底（按理说不会走到这里）
+    window.location.href = "/inbox";
   };
 
   return (
@@ -80,7 +88,6 @@ export default function VipAccessPage() {
       <div className="w-full max-w-md flex flex-col bg-[#f7f3ea]">
         {/* 顶部金色背景 + Logo 区 */}
         <div className="h-56 bg-gradient-to-b from-[#d3b272] to-[#f4e0b8] rounded-b-[32px] flex flex-col items-center justify-end pb-6">
-          {/* 这里可以换成你自己的 logo 图片 */}
           <div className="text-center text-[#8b6a33]">
             <div className="text-[11px] tracking-[0.35em] uppercase mb-1">
               WYNN PALACE
@@ -199,11 +206,12 @@ export default function VipAccessPage() {
                     GO TO CUSTOMER SERVICE
                   </button>
 
+                  {/* 只有在本地/dev 没有 kfUrl 的时候才显示这段提示 */}
                   {!result?.kfUrl && (
                     <p className="text-[10px] text-[#a89a88] text-center">
                       In development environment this will redirect to{" "}
-                      <code>/inbox</code>. On production it will open the WeChat
-                      customer service chat.
+                      <code>/inbox</code>. On production it will open the
+                      WeChat customer service chat.
                     </p>
                   )}
                 </div>

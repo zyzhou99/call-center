@@ -97,7 +97,7 @@ export async function POST(req: Request) {
           update: {
             sendTime: now,
             text: content,
-            payload: data as any,
+            payload: JSON.stringify(data),   // ✅ 存字符串
           },
           create: {
             msgId,
@@ -106,7 +106,7 @@ export async function POST(req: Request) {
             origin: "agent",
             msgType: "text",
             sendTime: now,
-            payload: data as any,
+            payload: JSON.stringify(data),   // ✅ 存字符串
             direction: "out",
             text: content,
             sessionId: session.id,

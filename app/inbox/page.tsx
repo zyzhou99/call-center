@@ -97,7 +97,9 @@ function InboxContent() {
 
     (async () => {
       try {
-        const resp = await fetch(`/api/vip/profile/${encodeURIComponent(sessionId)}`);
+        const resp = await fetch(
+          `/api/vip/profile/${encodeURIComponent(sessionId)}`
+        );
         const data = await resp.json();
 
         if (!data?.ok || !data.profile) {
@@ -120,7 +122,7 @@ function InboxContent() {
             unreadCount: 0,
             lastMessageAtLabel: "",
             vip: false,
-            online: false
+            online: false,
           };
 
           return [...prev, newConv];
@@ -147,16 +149,35 @@ function InboxContent() {
         const data = await resp.json();
         if (!data?.ok || stopped) return;
 
-        const serverConvs: Conversation[] = (data.conversations || []).map(
-          (c: any) => ({
-            id: c.id, // externalUserId
+        // 新版接口返回 { ok, sessions: [...] }，旧版可能是 conversations，做个兼容
+        const rawList: any[] = data.sessions || data.conversations || [];
+
+        const serverConvs: Conversation[] = rawList.map((c: any) => {
+          const conv: Conversation = {
+            // ✅ 这里用 Session.id，当作前端的 conversationId
+            id: c.id,
             channel: "wechat",
-            displayName: c.displayName || c.id,
-            lastMessagePreview: c.lastMessagePreview || "",
+            displayName:
+              (c.vipGuest &&
+                ((c.vipGuest.preferredName as string) ||
+                  (c.vipGuest.fullName as string))) ||
+              c.displayName ||
+              c.externalUserId ||
+              c.id,
+            lastMessagePreview: c.lastMsgPreview || c.lastMessagePreview || "",
             // 这里的 unreadCount 是「服务器记录的总未读数」
             unreadCount: Number(c.unreadCount || 0),
-          })
-        );
+            lastMessageAtLabel: "",
+            vip: false,
+            online: false,
+          };
+
+          // 额外挂在 externalUserId / vipGuest，后面发消息、取 VIP 卡片会用到
+          (conv as any).externalUserId = c.externalUserId || c.id;
+          (conv as any).vipGuest = c.vipGuest ?? null;
+
+          return conv;
+        });
 
         // 计算服务器未读快照 & 本地基线
         const serverUnreads: Record<string, number> = {};
@@ -335,10 +356,16 @@ function InboxContent() {
 
     // 微信渠道：从后端拉消息 + 清未读 + 拉 VIP Profile
     if (conv?.channel === "wechat") {
+      // ✅ 这里用 externalUserId 调 messages API
+      const externalUserId =
+        (conv as any).externalUserId ||
+        (conv as any).external_userid ||
+        conv.id;
+
       try {
         const resp = await fetch(
           `/api/wecom/sessions/${encodeURIComponent(
-            conversationId
+            externalUserId
           )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
           { headers: { "x-admin-token": ADMIN } }
         );
@@ -367,7 +394,7 @@ function InboxContent() {
         console.error("load wecom messages failed:", e);
       }
 
-      // 拉取 VIP Profile（如果有的话）
+      // 拉取 VIP Profile（如果有的话）——会话 id = Session.id
       try {
         const resp = await fetch(
           `/api/vip/profile/${encodeURIComponent(conversationId)}`
@@ -435,13 +462,18 @@ function InboxContent() {
     if (!conv || conv.channel !== "wechat") return;
 
     const convId = activeConversationId;
+    const externalUserId =
+      (conv as any).externalUserId ||
+      (conv as any).external_userid ||
+      conv.id;
+
     let stopped = false;
 
     const fetchMessages = async () => {
       try {
         const resp = await fetch(
           `/api/wecom/sessions/${encodeURIComponent(
-            convId
+            externalUserId
           )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
           { headers: { "x-admin-token": ADMIN } }
         );
@@ -496,13 +528,18 @@ function InboxContent() {
 
     // 微信渠道：真正发消息
     if (conv?.channel === "wechat") {
+      const externalUserId =
+        (conv as any).externalUserId ||
+        (conv as any).external_userid ||
+        conv.id;
+
       try {
         await fetch("/api/wecom/kf/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             open_kfid: OPEN_KFID,
-            touser: conversationId, // external_userid
+            touser: externalUserId, // ✅ external_userid
             content: text,
           }),
         });
@@ -560,4 +597,3 @@ function InboxContent() {
     </AppShell>
   );
 }
-

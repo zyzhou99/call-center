@@ -70,14 +70,10 @@ export async function POST(req: Request) {
       return new NextResponse("success", { status: 200 });
     }
 
-    // 这里先转成字符串备用（下面 sync_msg 用）
     const openKfid = String(open_kfid);
-
     const accessToken = await getWecomAccessToken();
 
-    // 1) 通过 sync_msg 拉「最近一批」消息
-    //    ⚠️ 粗暴版：不再使用 token / cursor，只靠 open_kfid + limit，
-    //    这样每次都会拿到最近一段历史里所有消息，再用 msgId 去重。
+    // 1) 通过 sync_msg 拉最近一批消息
     const syncResp = await fetch(
       `https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${encodeURIComponent(
         accessToken
@@ -87,7 +83,7 @@ export async function POST(req: Request) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           open_kfid: openKfid,
-          limit: 1000, // 你现在数据量很小，1000 足够覆盖所有最近历史
+          limit: 1000,
         }),
       }
     );
@@ -110,6 +106,7 @@ export async function POST(req: Request) {
         msgtype: m.msgtype,
         text: m.text?.content,
         external_userid: m.external_userid,
+        scene_param: m.scene_param,
       }))
     );
 
@@ -129,7 +126,7 @@ export async function POST(req: Request) {
       const externalUserId = m.external_userid
         ? String(m.external_userid)
         : "";
-      const originCode = m.origin; // 3=外部客户, 4=接待人员，其它值暂时归为 other
+      const originCode = m.origin;
       const msgType = m.msgtype;
       const sendTsSec = typeof m.send_time === "number" ? m.send_time : 0;
       const sendTime = sendTsSec ? new Date(sendTsSec * 1000) : new Date();
@@ -151,10 +148,31 @@ export async function POST(req: Request) {
         origin = "bot";
       }
 
-      // 文本内容
       let text: string | null = null;
       if (msgType === "text") {
         text = m.text?.content ?? null;
+      }
+
+      // ==== 2.0 解析 scene_param -> vipNumber ====
+      let vipGuest: any = null;
+      try {
+        const rawScene: string | undefined =
+          m.scene_param || m.scene || m.session_state;
+
+        if (rawScene && typeof rawScene === "string") {
+          const prefix = "vip:";
+          const idx = rawScene.indexOf(prefix);
+          if (idx >= 0) {
+            const vipNumber = rawScene.slice(idx + prefix.length).trim();
+            if (vipNumber) {
+              vipGuest = await prisma.vipGuest.findUnique({
+                where: { vipNumber },
+              });
+            }
+          }
+        }
+      } catch (e) {
+        console.error("❌ failed to parse/bind VIP from scene_param:", e);
       }
 
       // 先看 DB 里是不是已经有这条 msgId（避免重复写入）
@@ -175,6 +193,38 @@ export async function POST(req: Request) {
       // 2.1 upsert Session（按 openKfid + externalUserId）
       let session: any = null;
       try {
+        const updateData: any = {
+          lastMsgAt: sendTime,
+          lastMsgPreview: text ?? `[${msgType}]`,
+          unreadCount:
+            direction === "in" ? { increment: 1 } : undefined,
+        };
+
+        const createData: any = {
+          openKfid,
+          externalUserId,
+          displayName: externalUserId,
+          lastMsgAt: sendTime,
+          lastMsgPreview: text ?? `[${msgType}]`,
+          unreadCount: direction === "in" ? 1 : 0,
+          channel: "wechat",
+        };
+
+        // 如果这次消息带了 VIP 信息，就把 vipNumber / vipGuestId 写进 Session
+        if (vipGuest) {
+          updateData.vipNumber = vipGuest.vipNumber;
+          updateData.vipGuestId = vipGuest.id;
+          createData.vipNumber = vipGuest.vipNumber;
+          createData.vipGuestId = vipGuest.id;
+
+          const displayNameFromVip =
+            vipGuest.preferredName || vipGuest.fullName;
+          if (displayNameFromVip) {
+            updateData.displayName = displayNameFromVip;
+            createData.displayName = displayNameFromVip;
+          }
+        }
+
         session = await prisma.session.upsert({
           where: {
             openKfid_externalUserId: {
@@ -182,30 +232,15 @@ export async function POST(req: Request) {
               externalUserId,
             },
           },
-          update: {
-            lastMsgAt: sendTime,
-            lastMsgPreview: text ?? `[${msgType}]`,
-            // 客户来的消息才 +1 未读
-            unreadCount:
-              direction === "in" ? { increment: 1 } : undefined,
-          },
-          create: {
-            openKfid,
-            externalUserId,
-            displayName: externalUserId,
-            lastMsgAt: sendTime,
-            lastMsgPreview: text ?? `[${msgType}]`,
-            unreadCount: direction === "in" ? 1 : 0,
-            channel: "wechat",
-          },
+          update: updateData,
+          create: createData,
         });
       } catch (e) {
         console.error("❌ failed to upsert session in callback:", e);
-        // session 挂了就没办法写 Message，只能跳过
         continue;
       }
 
-      // 2.2 写入 Message 表
+      // 2.2 写入 Message 表（payload 一定要是字符串）
       try {
         await prisma.message.create({
           data: {
@@ -232,7 +267,6 @@ export async function POST(req: Request) {
         console.error("❌ failed to create message:", e);
       }
 
-      // 记录“本次真正新出现的客户文本消息”，用于后面的自动回复
       if (origin === "customer" && msgType === "text" && text) {
         lastNewCustomerText = {
           openKfid,
@@ -243,9 +277,7 @@ export async function POST(req: Request) {
       }
     }
 
-    // 3) 简单自动回复：
-    //    这里只做“收到一条新的客户消息，就回一条：已收到：xxx”
-    //    不再做 1 分钟判断，先保证链路稳定。
+    // 3) 简单自动回复
     if (lastNewCustomerText) {
       const autoText = `已收到：${lastNewCustomerText.content}`;
 
@@ -269,7 +301,6 @@ export async function POST(req: Request) {
         const sendData = await sendResp.json();
         console.log("✅ auto-reply send_msg:", sendData);
 
-        // 把机器人这条回复也写进 Message
         try {
           const botMsgId = String(
             sendData.msgid || `bot-${Date.now()}`
@@ -298,7 +329,6 @@ export async function POST(req: Request) {
       }
     }
 
-    // 一定要快速返回 success，否则企微会重试
     return new NextResponse("success", { status: 200 });
   } catch (e: any) {
     console.error("callback bot error:", e);
