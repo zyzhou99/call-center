@@ -39,7 +39,37 @@ CREATE TABLE "new_Message" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT "Message_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "Session" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
-INSERT INTO "new_Message" ("createdAt", "externalUserId", "id", "msgId", "msgType", "openKfid", "origin", "payload", "sendTime", "sessionId") SELECT "createdAt", "externalUserId", "id", "msgId", "msgType", "openKfid", "origin", "payload", "sendTime", "sessionId" FROM "Message";
+
+-- ⭐ 这里是我们改过的部分：把 direction 补成 COALESCE(..., 'in')
+INSERT INTO "new_Message" (
+    "id",
+    "msgId",
+    "openKfid",
+    "externalUserId",
+    "origin",
+    "msgType",
+    "sendTime",
+    "payload",
+    "direction",
+    "text",
+    "sessionId",
+    "createdAt"
+)
+SELECT
+    "id",
+    "msgId",
+    "openKfid",
+    "externalUserId",
+    "origin",
+    "msgType",
+    "sendTime",
+    "payload",
+    COALESCE("direction", 'in'),
+    "text",
+    "sessionId",
+    "createdAt"
+FROM "Message";
+
 DROP TABLE "Message";
 ALTER TABLE "new_Message" RENAME TO "Message";
 CREATE UNIQUE INDEX "Message_msgId_key" ON "Message"("msgId");
