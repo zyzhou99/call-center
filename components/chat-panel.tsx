@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, useRef, useEffect } from 'react';
-import { Conversation, Message } from '@/types';
-import { Phone, Smile, Paperclip, Mic, Send } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useLanguage } from '@/contexts/language-context';
+import { useState, useRef, useEffect } from "react";
+import { Conversation, Message } from "@/types";
+import { Phone, Smile, Paperclip, Mic, Send } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useLanguage } from "@/contexts/language-context";
 
 interface ChatPanelProps {
   conversation: Conversation | null;
@@ -12,13 +12,17 @@ interface ChatPanelProps {
   onSendMessage: (text: string) => void;
 }
 
-export function ChatPanel({ conversation, messages, onSendMessage }: ChatPanelProps) {
-  const [messageText, setMessageText] = useState('');
+export function ChatPanel({
+  conversation,
+  messages,
+  onSendMessage,
+}: ChatPanelProps) {
+  const [messageText, setMessageText] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { t } = useLanguage();
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   };
 
   useEffect(() => {
@@ -28,12 +32,12 @@ export function ChatPanel({ conversation, messages, onSendMessage }: ChatPanelPr
   const handleSend = () => {
     if (messageText.trim()) {
       onSendMessage(messageText.trim());
-      setMessageText('');
+      setMessageText("");
     }
   };
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
     }
@@ -41,44 +45,98 @@ export function ChatPanel({ conversation, messages, onSendMessage }: ChatPanelPr
 
   if (!conversation) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-white" style={{ color: 'var(--text-secondary)' }}>
+      <div
+        className="flex-1 flex items-center justify-center bg-white"
+        style={{ color: "var(--text-secondary)" }}
+      >
         Select a conversation to start messaging
       </div>
     );
   }
 
   const initials = conversation.displayName
-    .split(' ')
+    .split(" ")
     .map((n) => n[0])
-    .join('')
+    .join("")
     .toUpperCase()
     .slice(0, 2);
 
+  const channel = conversation.channel;
+  const sortedMessages = [...messages].sort(
+    (a, b) => (a.timestamp || 0) - (b.timestamp || 0)
+  );
+
   return (
     <div className="flex-1 flex flex-col bg-white">
-      <div className="px-6 py-4 flex items-center justify-between" style={{ borderBottom: '1px solid var(--divider)' }}>
+      {/* 顶部：头像 + 名字 + 电话按钮 */}
+      <div
+        className="px-6 py-4 flex items-center justify-between"
+        style={{ borderBottom: "1px solid var(--divider)" }}
+      >
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium" style={{ backgroundColor: 'var(--avatar-bg)', color: 'var(--accent)' }}>
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
+            style={{
+              backgroundColor: "var(--avatar-bg)",
+              color: "var(--accent)",
+            }}
+          >
             {initials}
           </div>
           <div>
-            <h2 className="font-medium" style={{ color: 'var(--text-primary)' }}>{conversation.displayName}</h2>
+            <h2
+              className="font-medium"
+              style={{ color: "var(--text-primary)" }}
+            >
+              {conversation.displayName}
+            </h2>
           </div>
         </div>
 
         <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-          <Phone className="w-5 h-5" style={{ color: 'var(--text-primary)' }} />
+          <Phone
+            className="w-5 h-5"
+            style={{ color: "var(--text-primary)" }}
+          />
         </button>
       </div>
 
+      {/* 中间内容：根据 channel 切换 UI */}
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-        {messages.map((message, index) => {
-          const showDateLabel = message.dateLabel && (index === 0 || messages[index - 1].dateLabel !== message.dateLabel);
+        {sortedMessages.map((message, index) => {
+          // 1) Email：一封封邮件样式 + 虚线分割
+          if (channel === "email") {
+            return (
+              <EmailMessageItem
+                key={message.id}
+                message={message}
+                index={index}
+              />
+            );
+          }
+
+          // 2) Phone：通话记录 + 可选 Summary（只有有 text 才显示）
+          if (channel === "phone") {
+            return <PhoneCallItem key={message.id} message={message} />;
+          }
+
+          // 3) 默认：原来的气泡聊天
+          const prev = sortedMessages[index - 1];
+          const showDateLabel =
+            message.dateLabel &&
+            (index === 0 || prev?.dateLabel !== message.dateLabel);
+
           return (
             <div key={message.id}>
               {showDateLabel && (
                 <div className="flex items-center justify-center my-4">
-                  <span className="px-3 py-1 text-xs rounded-full" style={{ backgroundColor: 'var(--bg)', color: 'var(--text-secondary)' }}>
+                  <span
+                    className="px-3 py-1 text-xs rounded-full"
+                    style={{
+                      backgroundColor: "var(--bg)",
+                      color: "var(--text-secondary)",
+                    }}
+                  >
                     {message.dateLabel}
                   </span>
                 </div>
@@ -90,79 +148,232 @@ export function ChatPanel({ conversation, messages, onSendMessage }: ChatPanelPr
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="px-6 py-4" style={{ borderTop: '1px solid var(--divider)' }}>
+      {/* 底部输入框：保持你原来的样式 & 逻辑 */}
+      <div
+        className="px-6 py-4"
+        style={{ borderTop: "1px solid var(--divider)" }}
+      >
         <div className="flex items-end space-x-2">
           <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-            <Smile className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+            <Smile
+              className="w-5 h-5"
+              style={{ color: "var(--text-secondary)" }}
+            />
           </button>
 
-          <div className="flex-1 rounded-lg shadow-sm" style={{ backgroundColor: 'var(--bg)', border: '1px solid var(--divider)' }}>
+          <div
+            className="flex-1 rounded-lg shadow-sm"
+            style={{
+              backgroundColor: "var(--bg)",
+              border: "1px solid var(--divider)",
+            }}
+          >
             <textarea
               value={messageText}
               onChange={(e) => setMessageText(e.target.value)}
               onKeyPress={handleKeyPress}
-              placeholder={t('composer.placeholder')}
+              placeholder={t("composer.placeholder")}
               rows={1}
               className="w-full px-4 py-3 bg-transparent resize-none focus:outline-none text-sm"
-              style={{ color: 'var(--text-primary)' }}
+              style={{ color: "var(--text-primary)" }}
             />
           </div>
 
           <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-            <Paperclip className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+            <Paperclip
+              className="w-5 h-5"
+              style={{ color: "var(--text-secondary)" }}
+            />
           </button>
 
           <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-            <Mic className="w-5 h-5" style={{ color: 'var(--text-secondary)' }} />
+            <Mic
+              className="w-5 h-5"
+              style={{ color: "var(--text-secondary)" }}
+            />
           </button>
 
           <button
             onClick={handleSend}
             disabled={!messageText.trim()}
             className="p-3 rounded-full transition-colors disabled:opacity-50"
-            style={{ backgroundColor: 'var(--accent)' }}
+            style={{ backgroundColor: "var(--accent)" }}
           >
             <Send className="w-5 h-5 text-white" />
           </button>
         </div>
 
-        <p className="text-xs text-center mt-2" style={{ color: 'var(--text-secondary)' }}>
-          {t('composer.helperText')}
+        <p
+          className="text-xs text-center mt-2"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {t("composer.helperText")}
         </p>
       </div>
     </div>
   );
 }
 
+/* ---------- 通用小工具 ---------- */
+
+function getTimeLabel(msg: Message) {
+  if (msg.timeLabel) return msg.timeLabel;
+  if (msg.timestamp) {
+    return new Date(msg.timestamp).toLocaleTimeString("en-US", {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }
+  return "";
+}
+
+function getDateLabel(msg: Message) {
+  if (msg.dateLabel) return msg.dateLabel;
+  if (msg.timestamp) {
+    return new Date(msg.timestamp).toLocaleDateString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "2-digit",
+    });
+  }
+  return "";
+}
+
+/* ---------- 默认气泡聊天 ---------- */
+
 interface MessageBubbleProps {
   message: Message;
 }
 
 function MessageBubble({ message }: MessageBubbleProps) {
-  const isInbound = message.direction === 'in';
+  const isInbound = message.direction === "in";
 
   return (
-    <div className={cn('flex', isInbound ? 'justify-start' : 'justify-end')}>
+    <div className={cn("flex", isInbound ? "justify-start" : "justify-end")}>
       <div className="max-w-xl">
         <div
           className={cn(
-            'px-4 py-2.5 rounded-2xl text-sm',
-            isInbound
-              ? 'rounded-tl-none shadow-sm'
-              : 'rounded-tr-none'
+            "px-4 py-2.5 rounded-2xl text-sm",
+            isInbound ? "rounded-tl-none shadow-sm" : "rounded-tr-none"
           )}
           style={
             isInbound
-              ? { backgroundColor: 'white', border: '1px solid var(--divider)', color: 'var(--text-primary)' }
-              : { backgroundColor: 'var(--note)', color: 'var(--text-primary)' }
+              ? {
+                  backgroundColor: "white",
+                  border: "1px solid var(--divider)",
+                  color: "var(--text-primary)",
+                }
+              : { backgroundColor: "var(--note)", color: "var(--text-primary)" }
           }
         >
           {message.text}
         </div>
-        <div className={cn('mt-1 text-xs', isInbound ? 'text-left' : 'text-right')} style={{ color: 'var(--text-secondary)' }}>
-          {message.timeLabel}
+        <div
+          className={cn(
+            "mt-1 text-xs",
+            isInbound ? "text-left" : "text-right"
+          )}
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {getTimeLabel(message)}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ---------- Email 渲染 ---------- */
+
+interface EmailMessageItemProps {
+  message: Message;
+  index: number;
+}
+
+function EmailMessageItem({ message, index }: EmailMessageItemProps) {
+  const fromLabel =
+    message.direction === "in" ? "From VIP" : "From hotel staff";
+  const date = getDateLabel(message);
+  const time = getTimeLabel(message);
+
+  return (
+    <div
+      className={cn(
+        "pt-4",
+        index > 0 ? "mt-4 border-t border-dashed border-[var(--divider)]" : ""
+      )}
+    >
+      <div className="flex items-center justify-between mb-1">
+        <div
+          className="text-xs font-medium"
+          style={{ color: "var(--text-secondary)" }}
+        >
+          {fromLabel}
+        </div>
+        <div className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          {date} · {time}
+        </div>
+      </div>
+      <div
+        className="mt-1 text-sm leading-relaxed whitespace-pre-wrap"
+        style={{ color: "var(--text-primary)" }}
+      >
+        {message.text}
+      </div>
+    </div>
+  );
+}
+
+/* ---------- Phone 通话记录 + 可选 Summary ---------- */
+
+interface PhoneCallItemProps {
+  message: Message;
+}
+
+function PhoneCallItem({ message }: PhoneCallItemProps) {
+  const isInbound = message.direction === "in";
+  const date = getDateLabel(message);
+  const time = getTimeLabel(message);
+
+  return (
+    <div className="border border-[var(--divider)] rounded-lg bg-[#FDFBF7] px-4 py-3 space-y-2 shadow-sm">
+      {/* 通话记录行 */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center space-x-2">
+          <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-black/5">
+            <Phone
+              className="w-3 h-3"
+              style={{ color: "var(--text-primary)" }}
+            />
+          </span>
+          <span
+            className="text-sm font-medium"
+            style={{ color: "var(--text-primary)" }}
+          >
+            {isInbound ? "Incoming call" : "Outgoing call"}
+          </span>
+        </div>
+        <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+          {date} · {time}
+        </span>
+      </div>
+
+      {/* 可选 Summary：只有有文字的时候才显示 */}
+      {message.text && message.text.trim().length > 0 && (
+        <div
+          className="mt-1 rounded-md px-3 py-2 bg-white border border-[var(--divider)]"
+          style={{ color: "var(--text-primary)" }}
+        >
+          <div
+            className="text-[11px] font-medium mb-1"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            Summary
+          </div>
+          <div className="text-sm leading-relaxed whitespace-pre-wrap">
+            {message.text}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

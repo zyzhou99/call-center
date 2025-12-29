@@ -1,11 +1,16 @@
 import { Conversation, Message, GuestProfile } from '@/types';
 
+// 统一时间基准
+const NOW = Date.now();
+const DAY = 24 * 60 * 60 * 1000;
+const HOUR = 60 * 60 * 1000;
+
 export const mockConversations: Conversation[] = [
   {
     id: '1',
-    channel: 'wechat',
+    channel: 'whatsapp', // 原来是 wechat，改成非 wechat 渠道
     displayName: 'Jayvion Simon',
-    lastMessagePreview: 'You: How To Boost...',
+    lastMessagePreview: 'No preference, please recommend...',
     lastMessageAtLabel: '3 days',
     unreadCount: 1,
     vip: true,
@@ -17,7 +22,7 @@ export const mockConversations: Conversation[] = [
     id: '2',
     channel: 'whatsapp',
     displayName: 'Reece Chung',
-    lastMessagePreview: '6 Powerful Tips To...',
+    lastMessagePreview: 'I would like to extend my stay for two more nights.',
     lastMessageAtLabel: '10 hours',
     unreadCount: 0,
     vip: false,
@@ -29,7 +34,8 @@ export const mockConversations: Conversation[] = [
     id: '3',
     channel: 'line',
     displayName: 'Lucian Obrien',
-    lastMessagePreview: 'How To Boost Traffic...',
+    lastMessagePreview:
+      'Good morning! Absolutely, I will send housekeeping to your room right away.',
     lastMessageAtLabel: '1 hours',
     unreadCount: 0,
     vip: false,
@@ -41,7 +47,8 @@ export const mockConversations: Conversation[] = [
     id: '4',
     channel: 'webchat',
     displayName: 'Deja Brady',
-    lastMessagePreview: 'Internet Banner...',
+    lastMessagePreview:
+      'Hello! Breakfast is served from 6:30 AM to 10:30 AM in our main dining room.',
     lastMessageAtLabel: '10 hours',
     unreadCount: 0,
     vip: false,
@@ -53,7 +60,8 @@ export const mockConversations: Conversation[] = [
     id: '5',
     channel: 'email',
     displayName: 'Harrison Stein',
-    lastMessagePreview: 'Free Real Estate...',
+    lastMessagePreview:
+      'Yes, our spa is open from 9 AM to 8 PM. Would you like me to book a treatment for you?',
     lastMessageAtLabel: '3 days',
     unreadCount: 1,
     vip: false,
@@ -65,7 +73,8 @@ export const mockConversations: Conversation[] = [
     id: '6',
     channel: 'phone',
     displayName: 'Cristopher Cardenas',
-    lastMessagePreview: 'Advertisers Embrace...',
+    lastMessagePreview:
+      'Certainly! We have an excellent Italian restaurant just 5 minutes away. I can make a reservation for you.',
     lastMessageAtLabel: '10 hours',
     unreadCount: 0,
     vip: true,
@@ -75,9 +84,10 @@ export const mockConversations: Conversation[] = [
   },
   {
     id: '7',
-    channel: 'wechat',
+    channel: 'webchat', // 原来是 wechat，改掉
     displayName: 'Melanie Noble',
-    lastMessagePreview: 'Nine Features Of An...',
+    lastMessagePreview:
+      'I apologize for the inconvenience. The current password is: HotelGuest2021. Please try that.',
     lastMessageAtLabel: '10 hours',
     unreadCount: 0,
     vip: false,
@@ -89,7 +99,8 @@ export const mockConversations: Conversation[] = [
     id: '8',
     channel: 'whatsapp',
     displayName: 'Shawn Manning',
-    lastMessagePreview: '7 Ways To Advertise...',
+    lastMessagePreview:
+      'Let me check availability for you. Yes, we can accommodate a late checkout until 2 PM.',
     lastMessageAtLabel: '10 hours',
     unreadCount: 0,
     vip: false,
@@ -101,7 +112,8 @@ export const mockConversations: Conversation[] = [
     id: '9',
     channel: 'line',
     displayName: 'Soren Durham',
-    lastMessagePreview: 'Influencing The...',
+    lastMessagePreview:
+      'Yes! Our fitness center is on the 3rd floor and is open 24/7 for all guests.',
     lastMessageAtLabel: '10 hours',
     unreadCount: 0,
     vip: false,
@@ -117,26 +129,31 @@ export const mockMessages: Record<string, Message[]> = {
       id: 'm1',
       conversationId: '1',
       direction: 'in',
-      text: 'Hey John, I am looking for the best admin template. Could you please help me to find it out?😃',
+      text:
+        'Hi, can you help me arrange a car pickup at 8:10 PM and a dinner reservation for 2 at 8:30?',
       timeLabel: '4:02 PM',
-      dateLabel: '21 Jan 2021',
-      timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 3 * DAY).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 3 * DAY,
     },
     {
       id: 'm2',
       conversationId: '1',
       direction: 'out',
-      text: 'Stack admin is the responsive bootstrap 4 admin template.',
+      text: 'Good evening. Absolutely, any restaurant preference, and should we bill everything to your room?',
       timeLabel: '4:02 PM',
-      timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000 + 60000,
+      timestamp: NOW - 3 * DAY + 60_000,
     },
     {
       id: 'm3',
       conversationId: '1',
       direction: 'in',
-      text: 'Looks clean and fresh UI.😃',
+      text: 'No preference, please recommend something upscale and yes, bill to the room.',
       timeLabel: '4:02 PM',
-      timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000 + 120000,
+      timestamp: NOW - 3 * DAY + 120_000,
     },
   ],
   '2': [
@@ -146,16 +163,21 @@ export const mockMessages: Record<string, Message[]> = {
       direction: 'in',
       text: 'Hello! I need some help with my room reservation.',
       timeLabel: '9:15 AM',
-      dateLabel: '20 Jan 2021',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 10 * HOUR).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 10 * HOUR,
     },
     {
       id: 'm5',
       conversationId: '2',
       direction: 'out',
-      text: 'Of course! I would be happy to assist you. What do you need help with?',
+      text:
+        'Of course! I would be happy to assist you. What do you need help with?',
       timeLabel: '9:16 AM',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000 + 60000,
+      timestamp: NOW - 10 * HOUR + 60_000,
     },
     {
       id: 'm6',
@@ -163,7 +185,7 @@ export const mockMessages: Record<string, Message[]> = {
       direction: 'in',
       text: 'I would like to extend my stay for two more nights.',
       timeLabel: '9:18 AM',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000 + 180000,
+      timestamp: NOW - 10 * HOUR + 180_000,
     },
   ],
   '3': [
@@ -173,16 +195,21 @@ export const mockMessages: Record<string, Message[]> = {
       direction: 'in',
       text: 'Good morning! Can I get extra towels in my room?',
       timeLabel: '8:30 AM',
-      dateLabel: '20 Jan 2021',
-      timestamp: Date.now() - 1 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 1 * HOUR).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 1 * HOUR,
     },
     {
       id: 'm8',
       conversationId: '3',
       direction: 'out',
-      text: 'Good morning! Absolutely, I will send housekeeping to your room right away.',
+      text:
+        'Good morning! Absolutely, I will send housekeeping to your room right away.',
       timeLabel: '8:32 AM',
-      timestamp: Date.now() - 1 * 60 * 60 * 1000 + 120000,
+      timestamp: NOW - 1 * HOUR + 120_000,
     },
   ],
   '4': [
@@ -192,16 +219,21 @@ export const mockMessages: Record<string, Message[]> = {
       direction: 'in',
       text: 'Hi there! What time is breakfast served?',
       timeLabel: '7:45 AM',
-      dateLabel: '19 Jan 2021',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 10 * HOUR).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 10 * HOUR,
     },
     {
       id: 'm10',
       conversationId: '4',
       direction: 'out',
-      text: 'Hello! Breakfast is served from 6:30 AM to 10:30 AM in our main dining room.',
+      text:
+        'Hello! Breakfast is served from 6:30 AM to 10:30 AM in our main dining room.',
       timeLabel: '7:46 AM',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000 + 60000,
+      timestamp: NOW - 10 * HOUR + 60_000,
     },
   ],
   '5': [
@@ -209,18 +241,24 @@ export const mockMessages: Record<string, Message[]> = {
       id: 'm11',
       conversationId: '5',
       direction: 'in',
-      text: 'I have a question about the spa services. Are they available today?',
+      text:
+        'I have a question about the spa services. Are they available today?',
       timeLabel: '2:20 PM',
-      dateLabel: '18 Jan 2021',
-      timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 3 * DAY).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 3 * DAY,
     },
     {
       id: 'm12',
       conversationId: '5',
       direction: 'out',
-      text: 'Yes, our spa is open from 9 AM to 8 PM. Would you like me to book a treatment for you?',
+      text:
+        'Yes, our spa is open from 9 AM to 8 PM. Would you like me to book a treatment for you?',
       timeLabel: '2:22 PM',
-      timestamp: Date.now() - 3 * 24 * 60 * 60 * 1000 + 120000,
+      timestamp: NOW - 3 * DAY + 120_000,
     },
   ],
   '6': [
@@ -228,18 +266,23 @@ export const mockMessages: Record<string, Message[]> = {
       id: 'm13',
       conversationId: '6',
       direction: 'in',
-      text: 'Could you recommend a good restaurant nearby?',
+      text: 'Book room from Dec 24 - Jan 2',
       timeLabel: '6:10 PM',
-      dateLabel: '18 Jan 2021',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 10 * HOUR).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 10 * HOUR,
     },
     {
       id: 'm14',
       conversationId: '6',
       direction: 'out',
-      text: 'Certainly! We have an excellent Italian restaurant just 5 minutes away. I can make a reservation for you.',
+      text:
+        'Prepare wine in the room',
       timeLabel: '6:12 PM',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000 + 120000,
+      timestamp: NOW - 10 * HOUR + 120_000,
     },
   ],
   '7': [
@@ -249,16 +292,21 @@ export const mockMessages: Record<string, Message[]> = {
       direction: 'in',
       text: 'The Wi-Fi password is not working in my room.',
       timeLabel: '11:30 AM',
-      dateLabel: '17 Jan 2021',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 10 * HOUR).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 10 * HOUR,
     },
     {
       id: 'm16',
       conversationId: '7',
       direction: 'out',
-      text: 'I apologize for the inconvenience. The current password is: HotelGuest2021. Please try that.',
+      text:
+        'I apologize for the inconvenience. The current password is: HotelGuest2021. Please try that.',
       timeLabel: '11:32 AM',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000 + 120000,
+      timestamp: NOW - 10 * HOUR + 120_000,
     },
   ],
   '8': [
@@ -268,16 +316,21 @@ export const mockMessages: Record<string, Message[]> = {
       direction: 'in',
       text: 'Can I get a late checkout tomorrow?',
       timeLabel: '5:45 PM',
-      dateLabel: '17 Jan 2021',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 10 * HOUR).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 10 * HOUR,
     },
     {
       id: 'm18',
       conversationId: '8',
       direction: 'out',
-      text: 'Let me check availability for you. Yes, we can accommodate a late checkout until 2 PM.',
+      text:
+        'Let me check availability for you. Yes, we can accommodate a late checkout until 2 PM.',
       timeLabel: '5:47 PM',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000 + 120000,
+      timestamp: NOW - 10 * HOUR + 120_000,
     },
   ],
   '9': [
@@ -287,16 +340,21 @@ export const mockMessages: Record<string, Message[]> = {
       direction: 'in',
       text: 'Is there a gym in the hotel?',
       timeLabel: '7:00 AM',
-      dateLabel: '16 Jan 2021',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000,
+      dateLabel: new Date(NOW - 10 * HOUR).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: '2-digit',
+      }),
+      timestamp: NOW - 10 * HOUR,
     },
     {
       id: 'm20',
       conversationId: '9',
       direction: 'out',
-      text: 'Yes! Our fitness center is on the 3rd floor and is open 24/7 for all guests.',
+      text:
+        'Yes! Our fitness center is on the 3rd floor and is open 24/7 for all guests.',
       timeLabel: '7:02 AM',
-      timestamp: Date.now() - 10 * 60 * 60 * 1000 + 120000,
+      timestamp: NOW - 10 * HOUR + 120_000,
     },
   ],
 };
@@ -313,7 +371,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Diamond',
     preferredName: 'Jay',
     vipNumber: 'VIP-D-10234',
-    notes: 'Drinks coffee every morning at 7 AM. Prefers non-smoking rooms. Enjoys Cuban cigars - favorite brand is Cohiba.',
+    notes:
+      'Drinks coffee every morning at 7 AM. Prefers non-smoking rooms. Enjoys Cuban cigars - favorite brand is Cohiba.',
   },
   '2': {
     conversationId: '2',
@@ -326,7 +385,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Gold',
     preferredName: 'Reece',
     vipNumber: 'VIP-G-45821',
-    notes: 'Allergic to feather pillows. Prefers high floor with city view.',
+    notes:
+      'Allergic to feather pillows. Prefers high floor with city view.',
   },
   '3': {
     conversationId: '3',
@@ -339,7 +399,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Platinum',
     preferredName: 'Lucian',
     vipNumber: 'VIP-P-29384',
-    notes: 'Frequent business traveler. Prefers early check-in when available.',
+    notes:
+      'Frequent business traveler. Prefers early check-in when available.',
   },
   '4': {
     conversationId: '4',
@@ -352,7 +413,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Red',
     preferredName: 'Deja',
     vipNumber: 'VIP-R-77492',
-    notes: 'Traveling with family. Requested extra towels and toiletries.',
+    notes:
+      'Traveling with family. Requested extra towels and toiletries.',
   },
   '5': {
     conversationId: '5',
@@ -365,7 +427,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Black',
     preferredName: 'Harry',
     vipNumber: 'VIP-B-19283',
-    notes: 'Regular spa guest. Prefers Swedish massage. Enjoys afternoon tea service.',
+    notes:
+      'Regular spa guest. Prefers Swedish massage. Enjoys afternoon tea service.',
   },
   '6': {
     conversationId: '6',
@@ -378,7 +441,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Chairman',
     preferredName: 'Chris',
     vipNumber: 'VIP-C-00123',
-    notes: 'VIP Chairman tier. Prefers suite with private butler service. Enjoys fine dining and wine tasting.',
+    notes:
+      'VIP Chairman tier. Prefers suite with private butler service. Enjoys fine dining and wine tasting.',
   },
   '7': {
     conversationId: '7',
@@ -391,7 +455,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Platinum',
     preferredName: 'Mel',
     vipNumber: 'VIP-P-55091',
-    notes: 'Prefers quiet rooms away from elevators. Enjoys room service breakfast.',
+    notes:
+      'Prefers quiet rooms away from elevators. Enjoys room service breakfast.',
   },
   '8': {
     conversationId: '8',
@@ -404,7 +469,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Gold',
     preferredName: 'Shawn',
     vipNumber: 'VIP-G-33187',
-    notes: 'Gym enthusiast. Requests wake-up calls at 6 AM. Enjoys protein-rich breakfast.',
+    notes:
+      'Gym enthusiast. Requests wake-up calls at 6 AM. Enjoys protein-rich breakfast.',
   },
   '9': {
     conversationId: '9',
@@ -417,6 +483,7 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipTier: 'Diamond',
     preferredName: 'Soren',
     vipNumber: 'VIP-D-88204',
-    notes: 'Tech-savvy guest. Appreciates smart room features. Prefers digital check-in/out.',
+    notes:
+      'Tech-savvy guest. Appreciates smart room features. Prefers digital check-in/out.',
   },
 };

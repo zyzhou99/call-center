@@ -9,7 +9,6 @@ export async function GET(
   { params }: { params: { id: string } }
 ) {
   try {
-    // 简单保护
     const adminToken = req.headers.get("x-admin-token");
     if (adminToken !== ADMIN_TOKEN) {
       return NextResponse.json(
@@ -21,7 +20,7 @@ export async function GET(
     const { searchParams } = new URL(req.url);
     const openKfid = searchParams.get("open_kfid");
     const takeParam = searchParams.get("take");
-    const take = takeParam ? Math.min(Number(takeParam) || 20, 100) : 20;
+    const take = takeParam ? Math.min(Number(takeParam) || 50, 200) : 50;
 
     if (!openKfid) {
       return NextResponse.json(
@@ -32,47 +31,58 @@ export async function GET(
 
     const externalUserId = params.id; // 路径里的 :id = external_userid
 
-    const rows = await prisma.message.findMany({
+    // ✅ 从“最新的”开始取，再反转成时间正序给前端
+    const rowsDesc = await prisma.message.findMany({
       where: {
         openKfid,
         externalUserId,
       },
-      orderBy: { sendTime: "asc" }, // 时间顺序
+      orderBy: { sendTime: "desc" }, // 最新的在前
       take,
     });
 
-    // 映射成前端用的 Message 类型
+    const rows = rowsDesc.slice().reverse(); // 转成从旧到新
+    
     const messages = rows.map((m) => {
-      // 文本优先从 m.text 拿，兜底从 payload 里拿
-      let text = (m as any).text as string | null;
-      if (!text) {
-        const payload = m.payload as any;
-        if (m.msgType === "text") {
-          text = payload?.text ?? "";
-        } else {
-          text = `[${m.msgType}]`;
-        }
-      }
+  // 文本优先从 m.text 拿，兜底从 payload 里拿
+  let text = (m as any).text as string | null;
+  if (!text) {
+    const payload = m.payload as any;
+    if (m.msgType === "text") {
+      text = payload?.text ?? "";
+    } else {
+      text = `[${m.msgType}]`;
+    }
+  }
 
-      const sendDate = new Date(m.sendTime);
+  const sendDate = new Date(m.sendTime);
 
-      return {
-        id: m.id,
-        conversationId: externalUserId, // 前端这边就用 external_userid 当 conversationId
-        direction: (m as any).direction === "out" ? "out" : "in",
-        text,
-        timestamp: sendDate.getTime(),
-        timeLabel: sendDate.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-        }),
-        dateLabel: sendDate.toLocaleDateString("en-US", {
-          year: "numeric",
-          month: "2-digit",
-          day: "2-digit",
-        }),
-      };
-    });
+  // ✅ 统一用北京时间显示
+  const timeLabel = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false, // 24 小时制：14:02
+  }).format(sendDate);
+
+  const dateLabel = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(sendDate);
+
+  return {
+    id: m.id,
+    conversationId: externalUserId, // 前端用 external_userid 当 conversationId
+    direction: (m as any).direction === "out" ? "out" : "in",
+    text,
+    timestamp: sendDate.getTime(), // 这个给前端算相对时间用，保持不变
+    timeLabel,
+    dateLabel,
+  };
+});
+
 
     return NextResponse.json({ ok: true, messages });
   } catch (e) {
