@@ -92,12 +92,10 @@ function ChannelIconButton({
       )}
       <Icon
         className={cn(
-          "w-7 h-7 mb-0.5",
-          // 让 path 填充为当前颜色 & 去掉细线感
-          "[&>path]:fill-current [&>path]:stroke-[1.2]",
+          "w-7 h-7 mb-0.5 [&>path]:stroke-[1.4]",   // 统一的尺寸和描边
           isActive
-            ? "text-black"          // 选中时深色实心
-            : "text-gray-300 group-hover:text-gray-100" // 未选中时浅一点
+            ? "text-black [&>path]:fill-current"     // 选中：黑色 + 实心
+            : "text-gray-300 group-hover:text-gray-100 [&>path]:fill-none" // 未选中：浅灰 + 空心
         )}
       />
       <span
