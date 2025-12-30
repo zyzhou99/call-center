@@ -2,75 +2,83 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN ?? "sync123";
+
 export async function GET(req: NextRequest) {
   try {
-    const { searchParams } = new URL(req.url);
-    const openKfid = searchParams.get("open_kfid");
-
-    if (!openKfid) {
+    const adminToken = req.headers.get("x-admin-token");
+    if (adminToken !== ADMIN_TOKEN) {
       return NextResponse.json(
-        { ok: false, error: "missing open_kfid" },
-        { status: 400 }
+        { ok: false, error: "unauthorized" },
+        { status: 401 }
       );
     }
 
-    console.log("[/api/wecom/sessions] open_kfid =", openKfid);
+    const { searchParams } = new URL(req.url);
+    const openKfid = searchParams.get("open_kfid") || undefined;
+    const q = searchParams.get("q")?.trim() || "";
+    const takeParam = searchParams.get("take");
+    const take = takeParam ? Math.min(Number(takeParam) || 50, 200) : 50;
 
-    // 先拿到所有 Session
+    const where: any = {};
+    if (openKfid) {
+      where.openKfid = openKfid;
+    }
+    if (q) {
+      where.OR = [
+        { externalUserId: { contains: q } },
+        { displayName: { contains: q } },
+        { vipNumber: { contains: q } },
+      ];
+    }
+
+    // ⭐ 关键：把 vipGuest 一起查出来
     const sessions = await prisma.session.findMany({
-      where: { openKfid },
+      where,
       orderBy: { lastMsgAt: "desc" },
+      take,
+      include: {
+        vipGuest: true,
+      },
     });
 
-    console.log(
-      "[/api/wecom/sessions] sessions count =",
-      sessions.length
-    );
+    const items = sessions.map((s) => {
+      const g = s.vipGuest;
 
-    // 对每个 Session 再查一条「最后一条消息」做 preview 兜底
-    const conversations = await Promise.all(
-      sessions.map(async (s) => {
-        // 从 Message 表里拿这个客户的最后一条消息
-        const lastMessage = await prisma.message.findFirst({
-          where: {
-            openKfid,
-            externalUserId: s.externalUserId,
-          },
-          orderBy: { sendTime: "desc" },
-          select: { text: true },
-        });
+      return {
+        id: s.id,
+        openKfid: s.openKfid,
+        externalUserId: s.externalUserId,
+        displayName: s.displayName,
+        channel: s.channel,
+        lastMsgAt: s.lastMsgAt,
+        lastMsgPreview: s.lastMsgPreview,
+        unreadCount: s.unreadCount,
+        vipNumber: s.vipNumber,
+        // ⭐ 这里把 guest 侧边栏需要的字段都整理好
+        vipGuest: g
+          ? {
+              id: g.id,
+              vipNumber: g.vipNumber,
+              fullName: g.fullName,
+              preferredName: g.preferredName,
+              tier: g.tier,
+              room: g.room,
+              checkInDate: g.checkInDate,
+              checkOutDate: g.checkOutDate,
+              segment: g.segment,
+              statusLabel: g.statusLabel,
+              notes: g.notes,
+            }
+          : null,
+      };
+    });
 
-        // 优先用 Session 表里的 lastMsgPreview；没有就用最后一条消息的 text
-        const lastMessagePreview =
-          s.lastMsgPreview ??
-          lastMessage?.text ??
-          "";
-
-        return {
-          // 用 externalUserId 当作会话 id（UI 用这个字段）
-          id: s.externalUserId ?? "",
-          displayName: s.displayName || s.externalUserId || "Guest",
-          lastMessagePreview,
-          unreadCount: s.unreadCount ?? 0,
-          channel: (s.channel as any) ?? "wechat",
-        };
-      })
-    );
-
-    return NextResponse.json({ ok: true, conversations });
-  } catch (err: any) {
-    console.error("[/api/wecom/sessions] error:", err);
-
-    const message =
-      err?.message ||
-      (typeof err === "string" ? err : JSON.stringify(err));
-
+    return NextResponse.json({ ok: true, sessions: items });
+  } catch (e) {
+    console.error("[/api/wecom/sessions] error:", e);
     return NextResponse.json(
-      {
-        ok: false,
-        error: "internal_error",
-        detail: message,
-      },
+      { ok: false, error: "internal_error" },
       { status: 500 }
     );
   }

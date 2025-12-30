@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import { ProtectedRoute } from "@/components/protected-route";
 import { AppShell, AppHeader } from "@/components/app-shell";
 import { LeftChannelRail } from "@/components/left-channel-rail";
@@ -13,6 +14,7 @@ import {
   mockProfiles,
 } from "@/lib/mock-data";
 import { Channel, Message, Conversation } from "@/types";
+import type { GuestProfile } from "@/types";
 import { getLastMessageTimestamp } from "@/lib/conversation-utils";
 
 const OPEN_KFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
@@ -28,13 +30,14 @@ export default function InboxPage() {
 }
 
 function InboxContent() {
-  // 现在只支持具体渠道，不再有 "all"
+  const searchParams = useSearchParams();
+
+  // 只支持具体渠道，不再有 "all"
   const [activeChannel, setActiveChannel] = useState<Channel>("wechat");
   const [searchQuery, setSearchQuery] = useState("");
 
   // mock 会话（非微信）
-  const [mockConvs, setMockConvs] =
-    useState<Conversation[]>(mockConversations);
+  const [mockConvs, setMockConvs] = useState<Conversation[]>(mockConversations);
 
   // 真实 wechat 会话
   const [wecomConversations, setWecomConversations] = useState<Conversation[]>(
@@ -45,12 +48,19 @@ function InboxContent() {
   const [messagesState, setMessagesState] =
     useState<Record<string, Message[]>>(mockMessages);
 
-  const [activeConversationId, setActiveConversationId] =
-    useState<string | null>(mockConversations[0]?.id || null);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(
+    mockConversations[0]?.id || null
+  );
+
+  // 右侧 Guest Profile（之前是 const 计算，这里改成 state，方便 wechat 用 API 回来填）
+  const [activeProfile, setActiveProfile] = useState<GuestProfile | null>(null);
 
   // 记录：服务器返回的「总未读数」快照 & 本地「已读基线」
   const wecomServerUnreadsRef = useRef<Record<string, number>>({});
   const wecomUnreadBaseRef = useRef<Record<string, number>>({});
+
+  // URL 里带进来的 sessionId（来自 /vip-access 跳转）
+  const sessionIdFromUrl = searchParams.get("sessionId");
 
   // 初始化：从 localStorage 恢复上次的 channel
   useEffect(() => {
@@ -75,7 +85,55 @@ function InboxContent() {
     }
   };
 
-  // 加载 + 轮询企业微信会话列表
+  // ✅ 如果从 /vip-access 带了 sessionId 上来：优先用它初始化当前会话 + 右侧 profile
+  useEffect(() => {
+    if (!sessionIdFromUrl) return;
+
+    const sessionId = sessionIdFromUrl;
+
+    // 切到 wechat 渠道
+    setActiveChannel("wechat");
+    setActiveConversationId(sessionId);
+
+    (async () => {
+      try {
+        const resp = await fetch(
+          `/api/vip/profile/${encodeURIComponent(sessionId)}`
+        );
+        const data = await resp.json();
+
+        if (!data?.ok || !data.profile) {
+          console.warn("Failed to load VIP profile from sessionId:", data?.error);
+          return;
+        }
+
+        const profile = data.profile as GuestProfile;
+        setActiveProfile(profile);
+
+        // 确保 wecomConversations 里至少有这一条会话
+        setWecomConversations((prev) => {
+          if (prev.some((c) => c.id === sessionId)) return prev;
+
+          const newConv: Conversation = {
+            id: sessionId,
+            channel: "wechat",
+            displayName: profile.name,
+            lastMessagePreview: profile.notes || "",
+            unreadCount: 0,
+            lastMessageAtLabel: "",
+            vip: false,
+            online: false,
+          };
+
+          return [...prev, newConv];
+        });
+      } catch (e) {
+        console.error("Error fetching VIP profile for sessionId:", e);
+      }
+    })();
+  }, [sessionIdFromUrl]);
+
+  // 加载 +（在 wechat channel 下）轮询企业微信会话列表
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -91,16 +149,35 @@ function InboxContent() {
         const data = await resp.json();
         if (!data?.ok || stopped) return;
 
-        const serverConvs: Conversation[] = (data.conversations || []).map(
-          (c: any) => ({
-            id: c.id, // externalUserId
+        // 新版接口返回 { ok, sessions: [...] }，旧版可能是 conversations，做个兼容
+        const rawList: any[] = data.sessions || data.conversations || [];
+
+        const serverConvs: Conversation[] = rawList.map((c: any) => {
+          const conv: Conversation = {
+            // ✅ 这里用 Session.id，当作前端的 conversationId
+            id: c.id,
             channel: "wechat",
-            displayName: c.displayName || c.id,
-            lastMessagePreview: c.lastMessagePreview || "",
+            displayName:
+              (c.vipGuest &&
+                ((c.vipGuest.preferredName as string) ||
+                  (c.vipGuest.fullName as string))) ||
+              c.displayName ||
+              c.externalUserId ||
+              c.id,
+            lastMessagePreview: c.lastMsgPreview || c.lastMessagePreview || "",
             // 这里的 unreadCount 是「服务器记录的总未读数」
             unreadCount: Number(c.unreadCount || 0),
-          })
-        );
+            lastMessageAtLabel: "",
+            vip: false,
+            online: false,
+          };
+
+          // 额外挂在 externalUserId / vipGuest，后面发消息、取 VIP 卡片会用到
+          (conv as any).externalUserId = c.externalUserId || c.id;
+          (conv as any).vipGuest = c.vipGuest ?? null;
+
+          return conv;
+        });
 
         // 计算服务器未读快照 & 本地基线
         const serverUnreads: Record<string, number> = {};
@@ -176,12 +253,10 @@ function InboxContent() {
     }
 
     return [...base].sort((a, b) => {
-      const aTimestamp = getLastMessageTimestamp(
-        messagesState[a.id] || mockMessages[a.id] || []
-      );
-      const bTimestamp = getLastMessageTimestamp(
-        messagesState[b.id] || mockMessages[b.id] || []
-      );
+      const aMsgs = messagesState[a.id] || mockMessages[a.id] || [];
+      const bMsgs = messagesState[b.id] || mockMessages[b.id] || [];
+      const aTimestamp = getLastMessageTimestamp(aMsgs);
+      const bTimestamp = getLastMessageTimestamp(bMsgs);
       return bTimestamp - aTimestamp;
     });
   }, [activeChannel, wecomConversations, mockConvs, messagesState]);
@@ -217,7 +292,7 @@ function InboxContent() {
   const activeConversation =
     allConversations.find((c) => c.id === activeConversationId) || null;
 
-  // ✅ activeMessages 做兜底：
+  // activeMessages 兜底：
   // 1. 优先用 messagesState
   // 2. 如果是 mock 渠道且 messagesState 里没有，就用 mockMessages
   const activeMessages: Message[] = useMemo(() => {
@@ -237,10 +312,6 @@ function InboxContent() {
     return [];
   }, [activeConversationId, allConversations, messagesState]);
 
-  const activeProfile = activeConversationId
-    ? mockProfiles[activeConversationId] || null
-    : null;
-
   // ✅ 全局搜索结果（不看当前 channel，搜所有会话 + 已加载消息 + mockMessages）
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -249,10 +320,7 @@ function InboxContent() {
     const byId: Record<string, Conversation> = {};
 
     allConversations.forEach((conv) => {
-      const nameMatch = conv.displayName
-        ?.toLowerCase()
-        .includes(q);
-
+      const nameMatch = conv.displayName?.toLowerCase().includes(q);
       const previewMatch = (conv.lastMessagePreview || "")
         .toLowerCase()
         .includes(q);
@@ -272,10 +340,8 @@ function InboxContent() {
     });
 
     return Object.values(byId).sort((a, b) => {
-      const msgsA =
-        messagesState[a.id] || mockMessages[a.id] || [];
-      const msgsB =
-        messagesState[b.id] || mockMessages[b.id] || [];
+      const msgsA = messagesState[a.id] || mockMessages[a.id] || [];
+      const msgsB = messagesState[b.id] || mockMessages[b.id] || [];
       const aTimestamp = getLastMessageTimestamp(msgsA);
       const bTimestamp = getLastMessageTimestamp(msgsB);
       return bTimestamp - aTimestamp;
@@ -288,12 +354,18 @@ function InboxContent() {
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // 微信渠道：从后端拉消息 + 清未读
+    // 微信渠道：从后端拉消息 + 清未读 + 拉 VIP Profile
     if (conv?.channel === "wechat") {
+      // ✅ 这里用 externalUserId 调 messages API
+      const externalUserId =
+        (conv as any).externalUserId ||
+        (conv as any).external_userid ||
+        conv.id;
+
       try {
         const resp = await fetch(
           `/api/wecom/sessions/${encodeURIComponent(
-            conversationId
+            externalUserId
           )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
           { headers: { "x-admin-token": ADMIN } }
         );
@@ -321,6 +393,23 @@ function InboxContent() {
       } catch (e) {
         console.error("load wecom messages failed:", e);
       }
+
+      // 拉取 VIP Profile（如果有的话）——会话 id = Session.id
+      try {
+        const resp = await fetch(
+          `/api/vip/profile/${encodeURIComponent(conversationId)}`
+        );
+        const data = await resp.json();
+        if (data?.ok && data.profile) {
+          setActiveProfile(data.profile as GuestProfile);
+        } else {
+          setActiveProfile(null);
+        }
+      } catch (e) {
+        console.error("load VIP profile failed:", e);
+        setActiveProfile(null);
+      }
+
       return;
     }
 
@@ -345,17 +434,18 @@ function InboxContent() {
         [conversationId]: mock,
       };
     });
+
+    // 3）右侧 profile 继续用 mockProfiles
+    setActiveProfile(mockProfiles[conversationId] || null);
   };
 
   // ✅ 搜索结果点击：自动切 channel + 打开会话 + 清空搜索框
   const handleSearchResultSelect = (id: string) => {
     const conv = allConversations.find((c) => c.id === id);
-    if (conv) {
-      if (conv.channel !== activeChannel) {
-        setActiveChannel(conv.channel);
-        if (typeof window !== "undefined") {
-          window.localStorage.setItem(CHANNEL_STORAGE_KEY, conv.channel);
-        }
+    if (conv && conv.channel !== activeChannel) {
+      setActiveChannel(conv.channel);
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(CHANNEL_STORAGE_KEY, conv.channel);
       }
     }
 
@@ -372,13 +462,18 @@ function InboxContent() {
     if (!conv || conv.channel !== "wechat") return;
 
     const convId = activeConversationId;
+    const externalUserId =
+      (conv as any).externalUserId ||
+      (conv as any).external_userid ||
+      conv.id;
+
     let stopped = false;
 
     const fetchMessages = async () => {
       try {
         const resp = await fetch(
           `/api/wecom/sessions/${encodeURIComponent(
-            convId
+            externalUserId
           )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
           { headers: { "x-admin-token": ADMIN } }
         );
@@ -433,13 +528,18 @@ function InboxContent() {
 
     // 微信渠道：真正发消息
     if (conv?.channel === "wechat") {
+      const externalUserId =
+        (conv as any).externalUserId ||
+        (conv as any).external_userid ||
+        conv.id;
+
       try {
         await fetch("/api/wecom/kf/send", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             open_kfid: OPEN_KFID,
-            touser: conversationId, // external_userid
+            touser: externalUserId, // ✅ external_userid
             content: text,
           }),
         });
