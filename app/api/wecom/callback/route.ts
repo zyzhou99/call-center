@@ -41,7 +41,7 @@ export async function GET(req: Request) {
   }
 }
 
-// 收到事件通知：拉消息 + 写入 Session / Message 表 + 简单自动回复
+// 收到事件通知：拉消息 + 写入 Session / Message 表 + 欢迎语自动回复
 export async function POST(req: Request) {
   try {
     const { searchParams } = new URL(req.url);
@@ -279,6 +279,7 @@ export async function POST(req: Request) {
     }
 
     // 2.3 如果这次有新的客户文本消息，并且有挂起的 VIP 绑定，就把 VIP 绑定到这个 externalUserId 上
+    //     并发送一条高端酒店欢迎语，而不是「已收到：xxx」
     if (lastNewCustomerText) {
       try {
         const pending = consumePendingVipBinding(openKfid);
@@ -299,63 +300,86 @@ export async function POST(req: Request) {
             externalUserId: lastNewCustomerText.externalUserId,
             vipNumber: pending.vipNumber,
           });
+
+          // 绑定成功后，根据 VIP 信息发送欢迎语
+          let vipGuestForWelcome: any = null;
+          try {
+            vipGuestForWelcome = await prisma.vipGuest.findUnique({
+              where: { id: pending.vipGuestId },
+            });
+          } catch (e) {
+            console.error("❌ failed to load vipGuest for welcome:", e);
+          }
+
+          const nameFromVip =
+            vipGuestForWelcome?.preferredName?.trim() ||
+            vipGuestForWelcome?.fullName?.trim() ||
+            "";
+
+          const welcomeText = nameFromVip
+            ? `尊贵的 ${nameFromVip} 贵宾，欢迎入住永利皇宫。我是您的专属礼宾 Joye，竭诚为您服务。`
+            : `尊贵的贵宾，欢迎入住永利皇宫。我是您的专属礼宾 Joye，竭诚为您服务。`;
+
+          try {
+            const sendResp = await fetch(
+              `https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${encodeURIComponent(
+                accessToken
+              )}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  open_kfid: lastNewCustomerText.openKfid,
+                  touser: lastNewCustomerText.externalUserId,
+                  msgtype: "text",
+                  text: { content: welcomeText },
+                }),
+              }
+            );
+
+            const sendData = await sendResp.json();
+            console.log("✅ welcome auto-reply send_msg:", sendData);
+
+            try {
+              const botMsgId = String(
+                sendData.msgid || `welcome-${Date.now()}`
+              );
+              await prisma.message.create({
+                data: {
+                  msgId: botMsgId,
+                  openKfid: lastNewCustomerText.openKfid,
+                  externalUserId: lastNewCustomerText.externalUserId,
+                  origin: "bot",
+                  msgType: "text",
+                  sendTime: new Date(),
+                  payload: JSON.stringify(sendData),
+                  direction: "out",
+                  text: welcomeText,
+                  sessionId: lastNewCustomerText.sessionId,
+                },
+              });
+
+              console.log(
+                "✅ saved welcome auto-reply:",
+                botMsgId,
+                welcomeText
+              );
+            } catch (e) {
+              console.error(
+                "❌ failed to save welcome auto-reply:",
+                e
+              );
+            }
+          } catch (e) {
+            console.error("❌ welcome auto-reply failed:", e);
+          }
         }
       } catch (e) {
         console.error("❌ failed to bind VIP from pending state:", e);
       }
     }
 
-    // 3) 简单自动回复
-    if (lastNewCustomerText) {
-      const autoText = `已收到：${lastNewCustomerText.content}`;
-
-      try {
-        const sendResp = await fetch(
-          `https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${encodeURIComponent(
-            accessToken
-          )}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              open_kfid: lastNewCustomerText.openKfid,
-              touser: lastNewCustomerText.externalUserId,
-              msgtype: "text",
-              text: { content: autoText },
-            }),
-          }
-        );
-
-        const sendData = await sendResp.json();
-        console.log("✅ auto-reply send_msg:", sendData);
-
-        try {
-          const botMsgId = String(
-            sendData.msgid || `bot-${Date.now()}`
-          );
-          await prisma.message.create({
-            data: {
-              msgId: botMsgId,
-              openKfid: lastNewCustomerText.openKfid,
-              externalUserId: lastNewCustomerText.externalUserId,
-              origin: "bot",
-              msgType: "text",
-              sendTime: new Date(),
-              payload: JSON.stringify(sendData),
-              direction: "out",
-              text: autoText,
-              sessionId: lastNewCustomerText.sessionId,
-            },
-          });
-
-          console.log("✅ saved bot auto-reply:", botMsgId, autoText);
-        } catch (e) {
-          console.error("❌ failed to save bot auto-reply:", e);
-        }
-      } catch (e) {
-        console.error("❌ auto-reply failed:", e);
-      }
-    }
+    // 不再发送「已收到：xxx」的自动回复
 
     return new NextResponse("success", { status: 200 });
   } catch (e: any) {
