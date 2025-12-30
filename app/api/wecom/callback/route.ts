@@ -4,6 +4,7 @@ export const runtime = "nodejs";
 import { NextResponse } from "next/server";
 import { getWecomAccessToken } from "@/lib/wecom/token";
 import { prisma } from "@/lib/db";
+import { consumePendingVipBinding } from "@/lib/vipBindingState";
 
 const WXBizMsgCrypt = require("wxcrypt");
 const { x2o } = require("wxcrypt");
@@ -153,11 +154,11 @@ export async function POST(req: Request) {
         text = m.text?.content ?? null;
       }
 
-      // ==== 2.0 解析 scene_param -> vipNumber ====
+      // ==== 2.0 解析 scene_param -> vipNumber（如果有的话）====
       let vipGuest: any = null;
       try {
         const rawScene: string | undefined =
-          m.scene_param || m.scene || m.session_state;
+          m.scene_param || (m as any).scene || (m as any).session_state;
 
         if (rawScene && typeof rawScene === "string") {
           const prefix = "vip:";
@@ -274,6 +275,33 @@ export async function POST(req: Request) {
           content: text,
           sessionId: session.id,
         };
+      }
+    }
+
+    // 2.3 如果这次有新的客户文本消息，并且有挂起的 VIP 绑定，就把 VIP 绑定到这个 externalUserId 上
+    if (lastNewCustomerText) {
+      try {
+        const pending = consumePendingVipBinding(openKfid);
+        if (pending) {
+          await prisma.session.updateMany({
+            where: {
+              openKfid,
+              externalUserId: lastNewCustomerText.externalUserId,
+            },
+            data: {
+              vipNumber: pending.vipNumber,
+              vipGuestId: pending.vipGuestId,
+            },
+          });
+
+          console.log("✅ bound VIP to session via pending state:", {
+            openKfid,
+            externalUserId: lastNewCustomerText.externalUserId,
+            vipNumber: pending.vipNumber,
+          });
+        }
+      } catch (e) {
+        console.error("❌ failed to bind VIP from pending state:", e);
       }
     }
 

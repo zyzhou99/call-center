@@ -1,45 +1,54 @@
 // lib/vipBindingState.ts
 
-export type VipBinding = {
+type PendingVipBinding = {
   vipGuestId: string;
   vipNumber: string;
-  expiresAt: number;
+  createdAt: number;
 };
 
-// 最近一次从 /vip-access 验证成功的 VIP
-let lastVipBinding: VipBinding | null = null;
+const pendingByOpenKfid = new Map<string, PendingVipBinding>();
 
-// 在 /api/vip/verify 里调用：记录这次 VIP 验证
-export function setLastVipBinding(vipGuestId: string, vipNumber: string) {
-  lastVipBinding = {
+// 挂起 10 分钟还没用就当作过期
+const EXPIRE_MS = 10 * 60 * 1000;
+
+/**
+ * 在 /api/vip/verify 那里调用：
+ * 表示：这个 openKfid 「下一位刚来聊天的客人」
+ * 要和哪个 VIP 绑定。
+ */
+export function setPendingVipBinding(
+  openKfid: string,
+  vipGuestId: string,
+  vipNumber: string
+) {
+  pendingByOpenKfid.set(openKfid, {
     vipGuestId,
     vipNumber,
-    // 有效期 5 分钟，防止被之后乱绑定
-    expiresAt: Date.now() + 5 * 60 * 1000,
-  };
-  console.log(
-    "[vip-binding] setLastVipBinding",
-    vipNumber,
-    "expires at",
-    new Date(lastVipBinding.expiresAt).toISOString()
-  );
+    createdAt: Date.now(),
+  });
+
+  console.log("[vipBinding] set pending", { openKfid, vipGuestId, vipNumber });
 }
 
-// 在 /api/wecom/callback 里调用：只消费一次，然后清空
-export function consumeLastVipBinding(): VipBinding | null {
-  if (!lastVipBinding) return null;
-
-  if (Date.now() > lastVipBinding.expiresAt) {
-    console.log(
-      "[vip-binding] expired, drop binding for",
-      lastVipBinding.vipNumber
-    );
-    lastVipBinding = null;
+/**
+ * 在 /api/wecom/callback 那里调用：
+ * 拿出并消费这个「待绑定 VIP」记录。
+ */
+export function consumePendingVipBinding(
+  openKfid: string
+): PendingVipBinding | null {
+  const pending = pendingByOpenKfid.get(openKfid);
+  if (!pending) {
     return null;
   }
 
-  const v = lastVipBinding;
-  lastVipBinding = null;
-  console.log("[vip-binding] consumeLastVipBinding", v.vipNumber);
-  return v;
+  pendingByOpenKfid.delete(openKfid);
+
+  if (Date.now() - pending.createdAt > EXPIRE_MS) {
+    console.log("[vipBinding] pending expired", { openKfid, ...pending });
+    return null;
+  }
+
+  console.log("[vipBinding] consume pending", { openKfid, ...pending });
+  return pending;
 }
