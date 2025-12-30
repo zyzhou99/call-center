@@ -49,7 +49,7 @@ export function ConversationListPanel({
       <div
         className="p-4"
         style={{
-          borderBottom: "1px solid var(--divider)",
+          // borderBottom: "1px solid var(--divider)",
           backgroundColor: "#F9F8F6",
         }}
       >
@@ -63,7 +63,7 @@ export function ConversationListPanel({
             placeholder={t("search.placeholder")}
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="w-full pl-10 pr-4 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-opacity-20 shadow-sm"
+            className="w-full pl-10 pr-4 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-opacity-20"
             style={{
               backgroundColor: "#FFFFFF",
               border: "1px solid var(--divider)",
@@ -182,17 +182,14 @@ function ConversationRow({
     <button
       onClick={onClick}
       className={cn(
-        "w-full px-4 py-3.5 flex items-center space-x-3 transition-colors text-left relative",
+        "w-full px-4 py-3.5 flex items-center space-x-3 transition-colors text-left focus:outline-none",
         isActive ? "" : "hover:bg-black/5"
       )}
       style={{
-        borderBottom: "1px solid var(--divider)",
         backgroundColor: isActive ? "#FFFFFF" : "transparent",
       }}
     >
-      {isActive && (
-        <div className="absolute left-0 top-0 bottom-0 w-1 bg-[var(--accent)]" />
-      )}
+      {/* ✅ 不再渲染左侧竖线，直接从头像开始 */}
       <div className="flex-shrink-0">
         <div
           className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-medium"
@@ -206,7 +203,7 @@ function ConversationRow({
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between mb-1">
+        <div className="flex items-center justify-between mb-0.5">
           <div className="flex items-center space-x-1.5 flex-1 min-w-0">
             <span
               className="font-medium truncate"
@@ -214,12 +211,12 @@ function ConversationRow({
             >
               {conversation.displayName}
             </span>
-            {vipColor && (
+            {/* {vipColor && (
               <div
                 className="flex-shrink-0 w-2.5 h-2.5 transform rotate-45"
                 style={{ backgroundColor: vipColor }}
               />
-            )}
+            )} */}
           </div>
           <span
             className="text-xs flex-shrink-0 ml-2"
@@ -228,10 +225,11 @@ function ConversationRow({
             {timeLabel}
           </span>
         </div>
+
         {conversation.room && (
           <div className="mb-1">
             <span
-              className="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded"
+              className="inline-block px-1.5 py-0.5 mb-0.5 text-[10px] font-medium rounded"
               style={{
                 backgroundColor: "var(--divider)",
                 color: "var(--text-secondary)",
@@ -241,6 +239,7 @@ function ConversationRow({
             </span>
           </div>
         )}
+
         <div className="flex items-center justify-between">
           <p
             className="text-sm truncate"
@@ -258,3 +257,4 @@ function ConversationRow({
     </button>
   );
 }
+

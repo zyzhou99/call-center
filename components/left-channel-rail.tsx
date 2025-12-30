@@ -3,6 +3,8 @@
 import { Channel } from '@/types';
 import { MessageCircle, Phone, Mail, MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import Image from 'next/image';
+import wynnGold from "@/assets/wynn-gold.png";
 
 interface LeftChannelRailProps {
   activeChannel: Channel;
@@ -29,10 +31,13 @@ export function LeftChannelRail({
 }: LeftChannelRailProps) {
   return (
     <div className="w-[72px] bg-[#1f1f1f] flex flex-col items-center py-6 border-r border-black/20">
-      <div className="mb-8">
-        <div className="text-2xl font-serif text-white tracking-wide">
-          Wynn
-        </div>
+      <div className="mb-8 px-2">
+        <Image
+          src={wynnGold}
+          alt="Wynn"
+          className="h-8 w-auto"
+          priority
+        />
       </div>
 
       <div className="flex-1 flex flex-col items-center space-y-2 w-full px-2">
@@ -73,20 +78,36 @@ function ChannelIconButton({
     <button
       onClick={onClick}
       className={cn(
-        'relative w-full flex flex-col items-center justify-center py-2 transition-all group rounded-lg',
+        'relative w-full flex flex-col items-center justify-center py-1.5 transition-all group rounded-lg',
         isActive
           ? 'text-white'
           : 'text-gray-500 hover:bg-white/5 hover:text-gray-300'
       )}
-      style={isActive ? { backgroundColor: '#9C7D47' } : {}}
+      style={isActive ? { background: 'linear-gradient(149deg, #F5CB8E 12.13%, #907250 106.89%)' } : {}}
     >
       {unreadCount > 0 && (
         <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-medium">
           {unreadCount > 9 ? '9' : unreadCount}
         </span>
       )}
-      <Icon className="w-5 h-5 mb-1" />
-      <span className="text-[9px] font-medium">{label}</span>
+      <Icon
+        className={cn(
+          "w-7 h-7 mb-0.5",
+          // 让 path 填充为当前颜色 & 去掉细线感
+          "[&>path]:fill-current [&>path]:stroke-[1.2]",
+          isActive
+            ? "text-black"          // 选中时深色实心
+            : "text-gray-300 group-hover:text-gray-100" // 未选中时浅一点
+        )}
+      />
+      <span
+        className={cn(
+          "text-[9px] font-medium",
+          isActive ? "text-black" : "text-gray-300 group-hover:text-gray-100"
+        )}
+      >
+        {label}
+      </span>
     </button>
   );
 }

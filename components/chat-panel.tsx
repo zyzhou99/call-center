@@ -153,16 +153,10 @@ export function ChatPanel({
         className="px-6 py-4"
         style={{ borderTop: "1px solid var(--divider)" }}
       >
-        <div className="flex items-end space-x-2">
-          <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-            <Smile
-              className="w-5 h-5"
-              style={{ color: "var(--text-secondary)" }}
-            />
-          </button>
-
+        <div className="flex items-center gap-3">
+          {/* 左侧：输入框 + 表情 + 附件，都在同一个大框里 */}
           <div
-            className="flex-1 rounded-lg shadow-sm"
+            className="flex-1 flex items-center rounded-xl shadow-sm"
             style={{
               backgroundColor: "var(--bg)",
               border: "1px solid var(--divider)",
@@ -174,32 +168,36 @@ export function ChatPanel({
               onKeyPress={handleKeyPress}
               placeholder={t("composer.placeholder")}
               rows={1}
-              className="w-full px-4 py-3 bg-transparent resize-none focus:outline-none text-sm"
+              className="flex-1 px-4 py-3 bg-transparent resize-none focus:outline-none text-sm"
               style={{ color: "var(--text-primary)" }}
             />
+
+            {/* 右侧图标区：在大框里面 */}
+            <div className="flex items-center gap-1 pr-2">
+              <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
+                <Smile
+                  className="w-5 h-5"
+                  style={{ color: "var(--text-secondary)" }}
+                />
+              </button>
+
+              <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
+                <Paperclip
+                  className="w-5 h-5"
+                  style={{ color: "var(--text-secondary)" }}
+                />
+              </button>
+            </div>
           </div>
 
-          <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-            <Paperclip
-              className="w-5 h-5"
-              style={{ color: "var(--text-secondary)" }}
-            />
-          </button>
-
-          <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-            <Mic
-              className="w-5 h-5"
-              style={{ color: "var(--text-secondary)" }}
-            />
-          </button>
-
+          {/* 右侧：发送按钮（在大框外面） */}
           <button
             onClick={handleSend}
             disabled={!messageText.trim()}
-            className="p-3 rounded-full transition-colors disabled:opacity-50"
-            style={{ backgroundColor: "var(--accent)" }}
+            className="p-3 rounded-md transition-colors disabled:opacity-60"
+            style={{ backgroundColor: "#F5E0B6" }}
           >
-            <Send className="w-5 h-5 text-white" />
+            <Send className="w-5 h-5 text-black" />
           </button>
         </div>
 
@@ -259,11 +257,10 @@ function MessageBubble({ message }: MessageBubbleProps) {
           style={
             isInbound
               ? {
-                  backgroundColor: "white",
-                  border: "1px solid var(--divider)",
+                  backgroundColor: "#F9F8F6",
                   color: "var(--text-primary)",
                 }
-              : { backgroundColor: "var(--note)", color: "var(--text-primary)" }
+              : { backgroundColor: "#F5E0B6", color: "var(--text-primary)" }
           }
         >
           {message.text}
