@@ -94,7 +94,7 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
               className="px-2.5 py-0.5 text-xs font-medium rounded-full text-white"
               style={{ backgroundColor: tierColor }}
             >
-              {profile.vipTier}
+              {profile.vipTier} VIP
             </span>
           </div>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
@@ -103,14 +103,20 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
         </div>
 
         <div className="mb-6">
-          <h3 className="text-xs font-semibold uppercase tracking-wider mb-4" style={{ color: 'var(--accent)' }}>
+          <h3
+            className="text-xs font-semibold uppercase tracking-wider mb-3 relative left-0 w-[calc(100%+3rem)] -ml-6 px-6 py-2"
+            style={{ color: 'var(--accent)', background: '#F9F8F6' }}
+          >
             {t('guestDetails.title')}
           </h3>
           <GuestDetailsTable profile={profile} />
         </div>
 
         <div className="mb-6">
-          <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--accent)' }}>
+          <h3
+            className="text-xs font-semibold uppercase tracking-wider mb-3 relative left-0 w-[calc(100%+3rem)] -ml-6 px-6 py-2"
+            style={{ color: 'var(--accent)', background: '#F9F8F6' }}
+          >
             {t('guestDetails.notes')}
           </h3>
           <NotesCard

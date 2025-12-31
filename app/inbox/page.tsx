@@ -312,7 +312,7 @@ function InboxContent() {
     return [];
   }, [activeConversationId, allConversations, messagesState]);
 
-  // ✅ 全局搜索结果（不看当前 channel，搜所有会话 + 已加载消息 + mockMessages）
+  // ✅ 全局搜索结果
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
@@ -453,7 +453,7 @@ function InboxContent() {
     void handleConversationSelect(id);
   };
 
-  // ✅ 轮询当前微信会话的消息（保证手机端新消息能自动出现在 PC）
+  // ✅ 轮询当前微信会话的消息
   useEffect(() => {
     if (activeChannel !== "wechat") return;
     if (!activeConversationId) return;
@@ -501,12 +501,38 @@ function InboxContent() {
     };
   }, [activeChannel, activeConversationId, allConversations]);
 
-  // 发消息
+  // 发消息（改动在这里）
   const handleSendMessage = async (text: string) => {
     if (!activeConversationId) return;
     const conversationId = activeConversationId;
 
-    // 先乐观更新 UI
+    const conv = allConversations.find((c) => c.id === conversationId);
+
+    // ✅ 微信渠道：不做乐观更新，直接发给后端，等轮询把真实消息拉回来
+    if (conv?.channel === "wechat") {
+      const externalUserId =
+        (conv as any).externalUserId ||
+        (conv as any).external_userid ||
+        conv.id;
+
+      try {
+        await fetch("/api/wecom/kf/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            open_kfid: OPEN_KFID,
+            touser: externalUserId, // external_userid
+            content: text,
+          }),
+        });
+        // 写入 DB 后，轮询会自动更新 messagesState
+      } catch (e) {
+        console.error("send wecom message failed:", e);
+      }
+      return;
+    }
+
+    // ✅ 其它渠道（mock）保留原来的乐观更新逻辑
     const newMessage: Message = {
       id: `m${Date.now()}`,
       conversationId,
@@ -523,34 +549,6 @@ function InboxContent() {
       ...prev,
       [conversationId]: [...(prev[conversationId] || []), newMessage],
     }));
-
-    const conv = allConversations.find((c) => c.id === conversationId);
-
-    // 微信渠道：真正发消息
-    if (conv?.channel === "wechat") {
-      const externalUserId =
-        (conv as any).externalUserId ||
-        (conv as any).external_userid ||
-        conv.id;
-
-      try {
-        await fetch("/api/wecom/kf/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            open_kfid: OPEN_KFID,
-            touser: externalUserId, // ✅ external_userid
-            content: text,
-          }),
-        });
-        // 真正写入 DB 后，轮询会把当前会话的最新消息再覆盖一遍
-      } catch (e) {
-        console.error("send wecom message failed:", e);
-      }
-      return;
-    }
-
-    // 其它渠道继续用 mock
   };
 
   const handleCloseConversation = () => {
