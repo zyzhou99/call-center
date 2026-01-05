@@ -10,9 +10,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// -------- Models & Enums（DB 里不用 enum / Json，全部用 String） --------
+// -------- Models（DB 里不用 enum / Json，全部用 String 存状态） --------
 
-// 用来存每个 OpenKfId 的同步状态（你之前就有的）
+// 用来存每个 OpenKfId 的同步状态（老 WeCom 逻辑，先保留）
 model KfSyncState {
   id        String   @id @default(cuid())
   openKfid  String   @unique
@@ -32,8 +32,11 @@ model VipGuest {
   fullName      String
   preferredName String?
 
-  // 原来是 VipTier enum，这里用 String 存，比如 "Diamond" / "Gold"
+  // 用 String 存，比如 "Diamond" / "Gold"
   tier          String?
+
+  // 生日（用于 vip-access 三项校验）
+  birthday      DateTime?
 
   // 这些字段对应你 mockProfiles 里的信息，方便右侧 GuestProfilePanel 展示
   room          String?
@@ -46,24 +49,27 @@ model VipGuest {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  // 一个 VIP 可以有多次会话记录
+  // 一个 VIP 可以有多次会话记录（旧 Session 表）
   sessions      Session[]
+
+  // 一个 VIP 可以对应多条 PendingApproval 记录
+  approvals     PendingApproval[]
 }
 
 // 一条「会话」= 一个 openKfId + 一个 externalUserId
-// 对应前端的 Conversation
+// 对应前端的 Conversation（老 WeCom 逻辑，Chatwoot POC 可以暂时不用）
 model Session {
   id             String   @id @default(cuid())
 
-  // 企业微信维度
+  // 企业微信维度（H5 也可以复用这些字段做占位）
   openKfid       String
   externalUserId String
 
   // UI 需要的字段
   displayName    String?          // 对话顶部 / 列表里显示的名字
 
-  // 原来是 Channel enum，这里用 String 存，比如 "wechat" / "whatsapp"
-  channel        String  @default("wechat") // wechat / whatsapp / line ...
+  // Channel：这里用 String 存，比如 "wechat" / "h5" / "whatsapp"
+  channel        String  @default("wechat") // wechat / h5 / whatsapp / line ...
 
   lastMsgAt      DateTime?        // 用来排序（最新消息时间）
   lastMsgPreview String?          // 列表里显示的最后一条摘要
@@ -95,18 +101,18 @@ model Session {
 model Message {
   id             String   @id @default(cuid())
 
-  // 企业微信原始字段
+  // 企业微信原始字段（H5 也会复用这些字段做占位）
   msgId          String   @unique
   openKfid       String
   externalUserId String
-  origin         String?  // 来源标记（比如 "wecom"），可选
+  origin         String?  // 来源标记，比如 "wecom" / "h5"，可选
   msgType        String   // text / image / event ...
-  sendTime       DateTime // 企业微信那边的发送时间
+  sendTime       DateTime // 发送时间（WeCom 原始时间或 H5 创建时间）
 
   // 原来是 Json，这里用 String 存 JSON 字符串就好
   payload        String   // 比如存 JSON.stringify(payload)
 
-  // 原来是 MessageDirection enum，这里用 String 存 "in" / "out"
+  // 消息方向，这里用 String 存 "in" / "out"
   direction      String          // "in" / "out"，决定气泡朝向
   text           String?         // 纯文本内容（从 payload 里抽出来）
 
@@ -118,4 +124,41 @@ model Message {
 
   // 常用查询索引
   @@index([openKfid, externalUserId, sendTime])
+}
+
+// 待人工审批的记录（无论是 WeCom 版还是 H5 版，都先写到这里）
+model PendingApproval {
+  id            String   @id @default(cuid())
+
+  // 入口模式：wecom / h5（从哪个二维码来的）
+  mode          String   // "wecom" | "h5"
+
+  // 关联到 VipGuest（真正的酒店 VIP 记录）
+  vipGuestId    String
+  vipGuest      VipGuest @relation(fields: [vipGuestId], references: [id])
+
+  // 冗余信息（方便查和展示）
+  vipNumber     String
+  preferredName String?
+  birthday      DateTime?
+
+  // 简单记录一下客户端信息，方便调试 / 平台识别
+  platform      String?  // 例如 "wechat-browser" / "mobile-browser"
+  userAgent     String?
+  browserId     String?  // 前端生成的 uuid，识别同一个设备
+
+  // 审批状态：用 String 存，比如 "PENDING" / "APPROVED" / "REJECTED"
+  status        String   @default("PENDING")
+  reason        String?  // 拒绝原因（可选）
+
+  // 审批通过后绑定到 Chatwoot
+  contactIdentifier String? // Chatwoot contact 的 source_id
+  conversationId    Int?    // Chatwoot conversation 的 id
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // 常用查询索引：按 VIP + 状态查、按模式 + 状态查
+  @@index([vipNumber, status])
+  @@index([mode, status])
 }
