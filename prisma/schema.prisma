@@ -12,7 +12,7 @@ datasource db {
 
 // -------- Models（DB 里不用 enum / Json，全部用 String 存状态） --------
 
-// 用来存每个 OpenKfId 的同步状态（老 WeCom 逻辑，先保留）
+// 老 WeCom 同步状态（先保留，将来不需要可以再删）
 model KfSyncState {
   id        String   @id @default(cuid())
   openKfid  String   @unique
@@ -22,7 +22,7 @@ model KfSyncState {
   createdAt DateTime @default(now())
 }
 
-// VIP guest 基础信息（假的也可以放这里，方便 H5 测试）
+// VIP guest 基础信息（假的也可以放这里，方便 H5 / POC 测试）
 model VipGuest {
   id            String   @id @default(cuid())
 
@@ -38,13 +38,28 @@ model VipGuest {
   // 生日（用于 vip-access 三项校验）
   birthday      DateTime?
 
-  // 这些字段对应你 mockProfiles 里的信息，方便右侧 GuestProfilePanel 展示
+  // 基本入住信息
   room          String?
   checkInDate   DateTime?
   checkOutDate  DateTime?
-  segment       String?  // Business / Leisure ...
-  statusLabel   String?  // Check in / Check out 等
-  notes         String?
+  segment       String?   // Business / Leisure ...
+  statusLabel   String?   // Check in / Check out 等
+
+  // 联系方式 / 渠道绑定（为以后微信 / WhatsApp 做准备）
+  mobilePhone      String?  // 原始手机号（酒店系统里的 phone）
+  whatsappNumber   String?  // 如需单独存 WhatsApp，用 E.164 也可以
+  wechatId         String?  // 用户自己说的微信号（手动记录用）
+  wechatOpenId     String?  // 以后如果接微信 OAuth，可以存 openid
+  email            String?
+  primaryLanguage  String?  // zh-CN / zh-HK / en 等
+  preferredChannel String?  // "wechat" / "whatsapp" / "phone" 等
+
+  // 喜好 / 忌讳（以后可以映射到 Chatwoot 的 custom_attributes）
+  stayPreference           String? // 住宿偏好：房型、楼层、枕头、硬床/软床等
+  diningPreference         String? // 饮食偏好 / 忌口 / 过敏
+  transportPreference      String? // 出行偏好：车类型、司机语言等
+  culturePrivacyPreference String? // 文化 / 隐私相关偏好（是否喜欢被打扰等）
+  otherPreferences         String? // 其他偏好（原来的 notes 改名）
 
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -57,7 +72,7 @@ model VipGuest {
 }
 
 // 一条「会话」= 一个 openKfId + 一个 externalUserId
-// 对应前端的 Conversation（老 WeCom 逻辑，Chatwoot POC 可以暂时不用）
+// 对应前端的 Conversation（老 WeCom 逻辑，Chatwoot POC 目前可以不用）
 model Session {
   id             String   @id @default(cuid())
 

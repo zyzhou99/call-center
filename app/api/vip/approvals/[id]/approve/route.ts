@@ -7,6 +7,8 @@ interface RouteParams {
   params: { id: string };
 }
 
+const DEFAULT_ASSIGNEE_ID = Number(process.env.CHATWOOT_DEFAULT_ASSIGNEE_ID ?? 0) || undefined;
+
 export async function POST(_req: Request, { params }: RouteParams) {
   const { id } = params;
 
@@ -52,6 +54,7 @@ export async function POST(_req: Request, { params }: RouteParams) {
         displayName,
         mode,
         platform: pending.platform,
+        assigneeId: DEFAULT_ASSIGNEE_ID,
       });
 
     // 3) 写回 PendingApproval
