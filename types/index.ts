@@ -1,4 +1,4 @@
-export type Channel = 'wechat' | 'whatsapp' | 'line' | 'webchat' | 'email' | 'phone';
+export type Channel = 'wechat' | 'whatsapp' | 'line' | 'webchat' | 'email' | 'phone' | 'vipRequests';
 
 export interface Conversation {
   id: string;

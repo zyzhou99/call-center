@@ -40,7 +40,7 @@ export function ConversationListPanel({
 
   return (
     <div
-      className="w-96 flex flex-col"
+      className="w-96 flex flex-col relative z-10"
       style={{
         backgroundColor: "#F9F8F6",
         borderRight: "1px solid var(--divider)",
@@ -49,7 +49,6 @@ export function ConversationListPanel({
       <div
         className="p-4"
         style={{
-          // borderBottom: "1px solid var(--divider)",
           backgroundColor: "#F9F8F6",
         }}
       >
@@ -165,7 +164,6 @@ function ConversationRow({
   const lastMessage = getLastMessage(messages);
   const previewFromMessages = getMessagePreview(lastMessage);
 
-  // ✅ 优先用后端 /api/wecom/sessions 返回的 lastMessagePreview
   const lastMessagePreview =
     typeof (conversation as any).lastMessagePreview === "string"
       ? (conversation as any).lastMessagePreview.trim()
@@ -189,7 +187,6 @@ function ConversationRow({
         backgroundColor: isActive ? "#FFFFFF" : "transparent",
       }}
     >
-      {/* ✅ 不再渲染左侧竖线，直接从头像开始 */}
       <div className="flex-shrink-0">
         <div
           className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-medium"
@@ -211,12 +208,12 @@ function ConversationRow({
             >
               {conversation.displayName}
             </span>
-            {/* {vipColor && (
+            {vipColor && (
               <div
                 className="flex-shrink-0 w-2.5 h-2.5 transform rotate-45"
                 style={{ backgroundColor: vipColor }}
               />
-            )} */}
+            )}
           </div>
           <span
             className="text-xs flex-shrink-0 ml-2"
@@ -257,4 +254,3 @@ function ConversationRow({
     </button>
   );
 }
-

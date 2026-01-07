@@ -97,7 +97,6 @@ export async function POST(req: Request) {
           fullName: guestToUse.fullName ?? null,
           room: guestToUse.room ?? null,
           vipTier: guestToUse.tier ?? null,
-          notes: guestToUse.notes ?? null,
         },
         kfUrl: null, // DEV 不跳企业微信，还是走 /inbox?sessionId=xxx
         sessionId: session.id,
@@ -115,7 +114,6 @@ export async function POST(req: Request) {
         fullName: guestToUse.fullName ?? null,
         room: guestToUse.room ?? null,
         vipTier: guestToUse.tier ?? null,
-        notes: guestToUse.notes ?? null,
       },
       kfUrl: PROD_KF_URL, // H5 会跳到这个真实客服链接
       sessionId: null, // 生产不跳 inbox

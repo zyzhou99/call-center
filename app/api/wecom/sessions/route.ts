@@ -68,7 +68,6 @@ export async function GET(req: NextRequest) {
               checkOutDate: g.checkOutDate,
               segment: g.segment,
               statusLabel: g.statusLabel,
-              notes: g.notes,
             }
           : null,
       };

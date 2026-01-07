@@ -16,10 +16,26 @@ import {
 import { Channel, Message, Conversation } from "@/types";
 import type { GuestProfile } from "@/types";
 import { getLastMessageTimestamp } from "@/lib/conversation-utils";
+import { VipRequestsView } from "@/components/inbox/vip-requests-view";
+
+type VipRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+
+interface VipRequestApi {
+  status: VipRequestStatus;
+}
+
+interface VipRequestsResponse {
+  ok: boolean;
+  items: VipRequestApi[];
+  error?: string;
+}
 
 const OPEN_KFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
 const ADMIN = "sync123";
 const CHANNEL_STORAGE_KEY = "cc_active_channel";
+
+// 在原來 Channel 的基礎上，加上 vipRequests 這個後台視圖用的 channel
+type InboxChannel = Channel | "vipRequests";
 
 export default function InboxPage() {
   return (
@@ -32,9 +48,10 @@ export default function InboxPage() {
 function InboxContent() {
   const searchParams = useSearchParams();
 
-  // 只支持具体渠道，不再有 "all"
-  const [activeChannel, setActiveChannel] = useState<Channel>("wechat");
+  // 只支持具体渠道（含 vipRequests），不再有 "all"
+  const [activeChannel, setActiveChannel] = useState<InboxChannel>("wechat");
   const [searchQuery, setSearchQuery] = useState("");
+  const [vipPendingCount, setVipPendingCount] = useState(0);
 
   // mock 会话（非微信）
   const [mockConvs, setMockConvs] = useState<Conversation[]>(mockConversations);
@@ -52,7 +69,7 @@ function InboxContent() {
     mockConversations[0]?.id || null
   );
 
-  // 右侧 Guest Profile（之前是 const 计算，这里改成 state，方便 wechat 用 API 回来填）
+  // 右侧 Guest Profile
   const [activeProfile, setActiveProfile] = useState<GuestProfile | null>(null);
 
   // 记录：服务器返回的「总未读数」快照 & 本地「已读基线」
@@ -62,7 +79,7 @@ function InboxContent() {
   // URL 里带进来的 sessionId（来自 /vip-access 跳转）
   const sessionIdFromUrl = searchParams.get("sessionId");
 
-  // 初始化：从 localStorage 恢复上次的 channel
+  // 初始化：从 localStorage 恢复上次的 channel（只恢复普通渠道）
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem(CHANNEL_STORAGE_KEY);
@@ -78,14 +95,15 @@ function InboxContent() {
     }
   }, []);
 
-  const handleChannelSelect = (channel: Channel) => {
+  const handleChannelSelect = (channel: InboxChannel) => {
     setActiveChannel(channel);
     if (typeof window !== "undefined") {
-      window.localStorage.setItem(CHANNEL_STORAGE_KEY, channel);
+      // 這裡記錄到 localStorage 的只是字符串，讀取時會過濾掉未知值
+      window.localStorage.setItem(CHANNEL_STORAGE_KEY, String(channel));
     }
   };
 
-  // ✅ 如果从 /vip-access 带了 sessionId 上来：优先用它初始化当前会话 + 右侧 profile
+  // 如果从 /vip-access 带了 sessionId 上来：优先用它初始化当前会话 + 右侧 profile
   useEffect(() => {
     if (!sessionIdFromUrl) return;
 
@@ -133,6 +151,41 @@ function InboxContent() {
     })();
   }, [sessionIdFromUrl]);
 
+    // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+
+    const fetchPendingCount = async () => {
+      try {
+        const res = await fetch("/api/vip/approvals");
+        const data: VipRequestsResponse = await res.json();
+
+        if (!data?.ok || !Array.isArray(data.items) || stopped) return;
+
+        const pending = data.items.filter(
+          (r) => r.status === "PENDING"
+        ).length;
+
+        setVipPendingCount(pending);
+      } catch (e) {
+        console.error("fetch vip pending count failed:", e);
+      }
+    };
+
+    // 不在 VIP Requests 视图时才用这个轮询；
+    // 在 VIP Requests 视图里，则交给子组件 VipRequestsView 自己回传 pending 数
+    if (activeChannel !== "vipRequests") {
+      fetchPendingCount();
+      timer = setInterval(fetchPendingCount, 15000); // 每 15 秒拉一次
+    }
+
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [activeChannel]);
+
   // 加载 +（在 wechat channel 下）轮询企业微信会话列表
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
@@ -154,7 +207,6 @@ function InboxContent() {
 
         const serverConvs: Conversation[] = rawList.map((c: any) => {
           const conv: Conversation = {
-            // ✅ 这里用 Session.id，当作前端的 conversationId
             id: c.id,
             channel: "wechat",
             displayName:
@@ -165,14 +217,12 @@ function InboxContent() {
               c.externalUserId ||
               c.id,
             lastMessagePreview: c.lastMsgPreview || c.lastMessagePreview || "",
-            // 这里的 unreadCount 是「服务器记录的总未读数」
             unreadCount: Number(c.unreadCount || 0),
             lastMessageAtLabel: "",
             vip: false,
             online: false,
           };
 
-          // 额外挂在 externalUserId / vipGuest，后面发消息、取 VIP 卡片会用到
           (conv as any).externalUserId = c.externalUserId || c.id;
           (conv as any).vipGuest = c.vipGuest ?? null;
 
@@ -190,10 +240,8 @@ function InboxContent() {
           serverUnreads[conv.id] = rawUnread;
 
           if (conv.id === activeConversationId) {
-            // 当前正在看的会话：认为这些都已读
             base[conv.id] = rawUnread;
           } else if (!(conv.id in base)) {
-            // 第一次看到这个会话：默认认为历史消息都已读
             base[conv.id] = rawUnread;
           }
         });
@@ -201,7 +249,6 @@ function InboxContent() {
         wecomServerUnreadsRef.current = serverUnreads;
         wecomUnreadBaseRef.current = base;
 
-        // 计算「真正要显示的小红点数量」= 总未读 - 基线
         const convList: Conversation[] = serverConvs.map((conv) => {
           const rawUnread = serverUnreads[conv.id] || 0;
           const baseUnread = base[conv.id] || 0;
@@ -220,19 +267,20 @@ function InboxContent() {
 
         setWecomConversations(convList);
 
-        // 没有选中会话时，默认选第一个 wechat 会话
         setActiveConversationId((prev) => prev || convList[0]?.id || prev);
       } catch (e) {
         console.error("load wecom sessions failed:", e);
       }
     };
 
+    
+
     // 初始化先拉一次
     fetchSessions();
 
     // 只有在微信渠道下才轮询更新会话列表
     if (activeChannel === "wechat") {
-      timer = setInterval(fetchSessions, 5000); // 每 5 秒拉一次
+      timer = setInterval(fetchSessions, 5000);
     }
 
     return () => {
@@ -248,7 +296,7 @@ function InboxContent() {
     if (activeChannel === "wechat") {
       base = wecomConversations;
     } else {
-      // 其他渠道用 mockConvs 并按 channel 过滤
+      // 其他渠道用 mockConvs 并按 channel 过滤（vipRequests 在這裡不會進來）
       base = mockConvs.filter((c) => c.channel === activeChannel);
     }
 
@@ -261,7 +309,7 @@ function InboxContent() {
     });
   }, [activeChannel, wecomConversations, mockConvs, messagesState]);
 
-  // 左侧栏未读数
+  // 左侧栏未读数（不含 vipRequests）
   const unreadCounts = useMemo(() => {
     const counts: Record<Channel, number> = {
       wechat: 0,
@@ -270,6 +318,8 @@ function InboxContent() {
       webchat: 0,
       email: 0,
       phone: 0,
+      // VIP Requests 的未读 = 当前所有 PENDING 请求数量
+      vipRequests: vipPendingCount,
     };
 
     mockConvs.forEach((conv) => {
@@ -281,7 +331,7 @@ function InboxContent() {
     });
 
     return counts;
-  }, [mockConvs, wecomConversations]);
+  }, [mockConvs, wecomConversations, vipPendingCount]);
 
   // 全部会话（用于搜索、activeConversation、选会话）
   const allConversations: Conversation[] = useMemo(
@@ -292,9 +342,7 @@ function InboxContent() {
   const activeConversation =
     allConversations.find((c) => c.id === activeConversationId) || null;
 
-  // activeMessages 兜底：
-  // 1. 优先用 messagesState
-  // 2. 如果是 mock 渠道且 messagesState 里没有，就用 mockMessages
+  // activeMessages 兜底
   const activeMessages: Message[] = useMemo(() => {
     if (!activeConversationId) return [];
 
@@ -312,7 +360,7 @@ function InboxContent() {
     return [];
   }, [activeConversationId, allConversations, messagesState]);
 
-  // ✅ 全局搜索结果
+  // 搜索结果
   const searchResults = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return [];
@@ -356,7 +404,6 @@ function InboxContent() {
 
     // 微信渠道：从后端拉消息 + 清未读 + 拉 VIP Profile
     if (conv?.channel === "wechat") {
-      // ✅ 这里用 externalUserId 调 messages API
       const externalUserId =
         (conv as any).externalUserId ||
         (conv as any).external_userid ||
@@ -378,7 +425,6 @@ function InboxContent() {
           }));
         }
 
-        // 标记为已读：更新本地已读基线 + 立即把 UI 未读清零
         const serverUnreads = wecomServerUnreadsRef.current;
         wecomUnreadBaseRef.current = {
           ...wecomUnreadBaseRef.current,
@@ -394,7 +440,6 @@ function InboxContent() {
         console.error("load wecom messages failed:", e);
       }
 
-      // 拉取 VIP Profile（如果有的话）——会话 id = Session.id
       try {
         const resp = await fetch(
           `/api/vip/profile/${encodeURIComponent(conversationId)}`
@@ -414,14 +459,12 @@ function InboxContent() {
     }
 
     // 非 wechat：mock 渠道
-    // 1）清未读
     setMockConvs((prevConversations) =>
       prevConversations.map((conv) =>
         conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
       )
     );
 
-    // 2）如果 messagesState 里是空的，就从 mockMessages 兜底补上
     setMessagesState((prev) => {
       const existing = prev[conversationId];
       if (existing && existing.length > 0) return prev;
@@ -435,11 +478,10 @@ function InboxContent() {
       };
     });
 
-    // 3）右侧 profile 继续用 mockProfiles
     setActiveProfile(mockProfiles[conversationId] || null);
   };
 
-  // ✅ 搜索结果点击：自动切 channel + 打开会话 + 清空搜索框
+  // 搜索结果点击
   const handleSearchResultSelect = (id: string) => {
     const conv = allConversations.find((c) => c.id === id);
     if (conv && conv.channel !== activeChannel) {
@@ -453,7 +495,7 @@ function InboxContent() {
     void handleConversationSelect(id);
   };
 
-  // ✅ 轮询当前微信会话的消息
+  // 轮询当前微信会话的消息
   useEffect(() => {
     if (activeChannel !== "wechat") return;
     if (!activeConversationId) return;
@@ -501,14 +543,14 @@ function InboxContent() {
     };
   }, [activeChannel, activeConversationId, allConversations]);
 
-  // 发消息（改动在这里）
+  // 发消息
   const handleSendMessage = async (text: string) => {
     if (!activeConversationId) return;
     const conversationId = activeConversationId;
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // ✅ 微信渠道：不做乐观更新，直接发给后端，等轮询把真实消息拉回来
+    // 微信渠道：不做乐观更新，直接发给后端，等轮询把真实消息拉回来
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
@@ -521,18 +563,17 @@ function InboxContent() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             open_kfid: OPEN_KFID,
-            touser: externalUserId, // external_userid
+            touser: externalUserId,
             content: text,
           }),
         });
-        // 写入 DB 后，轮询会自动更新 messagesState
       } catch (e) {
         console.error("send wecom message failed:", e);
       }
       return;
     }
 
-    // ✅ 其它渠道（mock）保留原来的乐观更新逻辑
+    // 其它渠道（mock）
     const newMessage: Message = {
       id: `m${Date.now()}`,
       conversationId,
@@ -563,33 +604,44 @@ function InboxContent() {
         unreadCounts={unreadCounts}
       />
 
-      <div className="flex-1 flex overflow-hidden">
-        <ConversationListPanel
-          conversations={visibleConversations}
-          activeConversationId={activeConversationId}
-          onConversationSelect={handleConversationSelect}
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          messagesState={messagesState}
-          searchResults={searchResults}
-          onSearchResultSelect={handleSearchResultSelect}
-        />
+      {/* 右側主區域：上面是 Header，下面根據 channel 切換內容 */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        <AppHeader />
 
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <AppHeader />
+        <div className="flex-1 flex overflow-hidden">
+          {activeChannel === "vipRequests" ? (
+            // 👉 VIP Requests 審批視圖
+            <VipRequestsView onPendingCountChange={setVipPendingCount} />
+          ) : (
+            // 👉 普通渠道：會話列表 + 聊天 + Profile
+            <>
+              <ConversationListPanel
+                conversations={visibleConversations}
+                activeConversationId={activeConversationId}
+                onConversationSelect={handleConversationSelect}
+                searchQuery={searchQuery}
+                onSearchChange={setSearchQuery}
+                messagesState={messagesState}
+                searchResults={searchResults}
+                onSearchResultSelect={handleSearchResultSelect}
+              />
 
-          <div className="flex-1 flex overflow-hidden">
-            <ChatPanel
-              conversation={activeConversation}
-              messages={activeMessages}
-              onSendMessage={handleSendMessage}
-            />
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 flex overflow-hidden">
+                  <ChatPanel
+                    conversation={activeConversation}
+                    messages={activeMessages}
+                    onSendMessage={handleSendMessage}
+                  />
 
-            <GuestProfilePanel
-              profile={activeProfile}
-              onCloseConversation={handleCloseConversation}
-            />
-          </div>
+                  <GuestProfilePanel
+                    profile={activeProfile}
+                    onCloseConversation={handleCloseConversation}
+                  />
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
     </AppShell>
