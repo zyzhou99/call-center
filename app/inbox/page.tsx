@@ -26,7 +26,8 @@ interface VipRequestApi {
 
 interface VipRequestsResponse {
   ok: boolean;
-  items: VipRequestApi[];
+  items?: VipRequestApi[];
+  approvals?: VipRequestApi[];
   error?: string;
 }
 
@@ -34,8 +35,8 @@ const OPEN_KFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
 const ADMIN = "sync123";
 const CHANNEL_STORAGE_KEY = "cc_active_channel";
 
-// 在原來 Channel 的基礎上，加上 vipRequests 這個後台視圖用的 channel
-type InboxChannel = Channel | "vipRequests";
+// Channel 类型里已经包含了 "vipRequests"
+type InboxChannel = Channel;
 
 export default function InboxPage() {
   return (
@@ -79,7 +80,7 @@ function InboxContent() {
   // URL 里带进来的 sessionId（来自 /vip-access 跳转）
   const sessionIdFromUrl = searchParams.get("sessionId");
 
-  // 初始化：从 localStorage 恢复上次的 channel（只恢复普通渠道）
+  // 初始化：从 localStorage 恢复上次的 channel（只恢复普通渠道，不强行跳 vipRequests）
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem(CHANNEL_STORAGE_KEY);
@@ -89,16 +90,16 @@ function InboxContent() {
       stored === "line" ||
       stored === "webchat" ||
       stored === "email" ||
-      stored === "phone"
+      stored === "phone" ||
+      stored === "vipRequests"
     ) {
-      setActiveChannel(stored as Channel);
+      setActiveChannel(stored as InboxChannel);
     }
   }, []);
 
   const handleChannelSelect = (channel: InboxChannel) => {
     setActiveChannel(channel);
     if (typeof window !== "undefined") {
-      // 這裡記錄到 localStorage 的只是字符串，讀取時會過濾掉未知值
       window.localStorage.setItem(CHANNEL_STORAGE_KEY, String(channel));
     }
   };
@@ -151,7 +152,8 @@ function InboxContent() {
     })();
   }, [sessionIdFromUrl]);
 
-    // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
+  // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
+  // 不在 VIP Requests 视图时启用；在 VIP Requests 视图里交给 VipRequestsView 回传
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -161,20 +163,21 @@ function InboxContent() {
         const res = await fetch("/api/vip/approvals");
         const data: VipRequestsResponse = await res.json();
 
-        if (!data?.ok || !Array.isArray(data.items) || stopped) return;
+        if (stopped || !data?.ok) return;
 
-        const pending = data.items.filter(
-          (r) => r.status === "PENDING"
-        ).length;
+        const list = Array.isArray(data.items)
+          ? data.items
+          : Array.isArray(data.approvals)
+          ? data.approvals
+          : [];
 
+        const pending = list.filter((r) => r.status === "PENDING").length;
         setVipPendingCount(pending);
       } catch (e) {
         console.error("fetch vip pending count failed:", e);
       }
     };
 
-    // 不在 VIP Requests 视图时才用这个轮询；
-    // 在 VIP Requests 视图里，则交给子组件 VipRequestsView 自己回传 pending 数
     if (activeChannel !== "vipRequests") {
       fetchPendingCount();
       timer = setInterval(fetchPendingCount, 15000); // 每 15 秒拉一次
@@ -273,8 +276,6 @@ function InboxContent() {
       }
     };
 
-    
-
     // 初始化先拉一次
     fetchSessions();
 
@@ -289,14 +290,13 @@ function InboxContent() {
     };
   }, [activeChannel, activeConversationId]);
 
-  // 当前要展示的会话源：按照当前 channel 拆分
+  // 当前要展示的会话源：按照当前 channel 拆分（vipRequests 在这里不会进来）
   const visibleConversations = useMemo(() => {
     let base: Conversation[];
 
     if (activeChannel === "wechat") {
       base = wecomConversations;
     } else {
-      // 其他渠道用 mockConvs 并按 channel 过滤（vipRequests 在這裡不會進來）
       base = mockConvs.filter((c) => c.channel === activeChannel);
     }
 
@@ -309,7 +309,7 @@ function InboxContent() {
     });
   }, [activeChannel, wecomConversations, mockConvs, messagesState]);
 
-  // 左侧栏未读数（不含 vipRequests）
+  // 左侧栏未读数（包含 vipRequests）
   const unreadCounts = useMemo(() => {
     const counts: Record<Channel, number> = {
       wechat: 0,
@@ -318,8 +318,7 @@ function InboxContent() {
       webchat: 0,
       email: 0,
       phone: 0,
-      // VIP Requests 的未读 = 当前所有 PENDING 请求数量
-      vipRequests: vipPendingCount,
+      vipRequests: 0,
     };
 
     mockConvs.forEach((conv) => {
@@ -329,6 +328,9 @@ function InboxContent() {
     wecomConversations.forEach((conv) => {
       counts.wechat += conv.unreadCount;
     });
+
+    // VIP Requests 的未读 = 当前所有 PENDING 请求数量
+    counts.vipRequests = vipPendingCount;
 
     return counts;
   }, [mockConvs, wecomConversations, vipPendingCount]);
@@ -485,7 +487,7 @@ function InboxContent() {
   const handleSearchResultSelect = (id: string) => {
     const conv = allConversations.find((c) => c.id === id);
     if (conv && conv.channel !== activeChannel) {
-      setActiveChannel(conv.channel);
+      setActiveChannel(conv.channel as InboxChannel);
       if (typeof window !== "undefined") {
         window.localStorage.setItem(CHANNEL_STORAGE_KEY, conv.channel);
       }

@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import vipLogin from "@/assets/vip-login1.png";
 
-// 10 分钟复用窗口
+// 10 分鐘復用窗口
 const REUSE_WINDOW_MS = 10 * 60 * 1000;
 
 type VersionType = "hybrid" | "h5";
@@ -117,7 +117,7 @@ export default function VipAccessPage() {
   const [entryMode, setEntryMode] = useState<EntryMode>("h5");
   const [scanChannel, setScanChannel] = useState<ScanChannel>("browser");
 
-  // 从 URL 读 version，默认 hybrid
+  // 從 URL 讀 version，預設 hybrid
   const version: VersionType = useMemo(() => {
     const v = searchParams.get("version");
     if (v === "h5") return "h5";
@@ -126,7 +126,7 @@ export default function VipAccessPage() {
 
   const t = TEXTS[language];
 
-  // 入口模式识别：WeChat / 浏览器 + version
+  // 入口模式識別：WeChat / 瀏覽器 + version
   useEffect(() => {
     if (typeof navigator === "undefined") return;
     const ua = navigator.userAgent || "";
@@ -141,7 +141,7 @@ export default function VipAccessPage() {
     }
   }, [version]);
 
-  // 页面加载时，检查 10 分钟内是否有 pending 记录，有的话直接跳到 /vip-pending
+  // 頁面載入時檢查 10 分鐘內是否有 pending 記錄，有的話直接跳到 /vip-pending
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -158,8 +158,9 @@ export default function VipAccessPage() {
         return;
       }
 
-      // 10 分鐘內：直接復用上一次的 pendingId
-      router.replace(`/vip-pending?pendingId=${encodeURIComponent(saved.pendingId)}`);
+      router.replace(
+        `/vip-pending?pendingId=${encodeURIComponent(saved.pendingId)}`
+      );
     } catch (e) {
       console.error("Failed to auto-redirect from saved pending", e);
     }
@@ -172,7 +173,7 @@ export default function VipAccessPage() {
     if (digits.length === 4) return digits;
     if (digits.length === 3) return digits.padStart(4, "0");
     if (digits.length === 2) {
-      // 像 "323" 輸錯成 "32" 的情況，先不自動糾正，返回 null 讓後端判錯
+      // 像 "323" 輸錯成 "32" 的情況，先不自動糾正，返回原值讓後端判錯
       return digits;
     }
     return digits;
@@ -206,7 +207,7 @@ export default function VipAccessPage() {
     setLoading(true);
     try {
       const normalized = normalizeBirthdayMd(birthdayMd);
-      // 這裡先簡單處理，真正格式錯誤後端還會再校驗
+
       const body = {
         vipNumber: vipNumber.trim(),
         preferredName: preferredName.trim() || undefined,
@@ -382,9 +383,10 @@ export default function VipAccessPage() {
 
             {/* 調試：顯示當前模式（之後可以隱藏） */}
             <p className="mt-4 text-[10px] text-[#9a856a]">
-              {t.modeLabel}： version=<span className="font-mono">{version}</span>,{" "}
-              entryMode=<span className="font-mono">{entryMode}</span>,{" "}
-              scanChannel=<span className="font-mono">{scanChannel}</span>
+              {t.modeLabel}： version=
+              <span className="font-mono">{version}</span>, entryMode=
+              <span className="font-mono">{entryMode}</span>, scanChannel=
+              <span className="font-mono">{scanChannel}</span>
             </p>
           </form>
         </div>
