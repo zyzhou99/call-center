@@ -12,7 +12,7 @@ datasource db {
 
 // -------- Models & Enums（DB 里不用 enum / Json，全部用 String） --------
 
-// 用来存每个 OpenKfId 的同步状态（你之前就有的）
+// 用来存每个 OpenKfId 的同步状态
 model KfSyncState {
   id        String   @id @default(cuid())
   openKfid  String   @unique
@@ -22,22 +22,32 @@ model KfSyncState {
   createdAt DateTime @default(now())
 }
 
-// VIP guest 基础信息（假的也可以放这里，方便 H5 测试）
+// VIP guest 基础信息（目前只保证有 vipNumber + fullName，其他字段可以为空）
 model VipGuest {
   id            String  @id @default(cuid())
   vipNumber     String  @unique
   fullName      String
   preferredName String?
 
-  /// 生日：只存 MMDD（例如 "0323"），用于和用户输入校验
+  /// 生日：只存 MMDD（例如 "0323"），目前 PoC 不强依赖，可留空
   birthdayMd String?
 
   /// 行为 / 偏好 / 忌讳点
-  prefStay           String? // 住宿喜好
-  prefDining         String? // 用餐喜好
-  prefTransport      String? // 出行喜好
-  prefCulturePrivacy String? // 文化 / 隐私 / 忌讳（如“数字不得含 4，避免皮革礼品”）
-  prefOther          String? // 其他
+  /// preference = 喜好；restriction = 忌讳 / 不能 / 需要避免
+  stayPreference            String? // 住宿喜好（例：高楼层、安静房间）
+  stayRestriction           String? // 住宿限制（例：不能靠电梯、不能无烟房）
+
+  diningPreference          String? // 用餐喜好（例：素食、喜欢品鉴菜单）
+  diningRestriction         String? // 用餐忌讳（例：不能吃海鲜、坚果过敏）
+
+  transportPreference       String? // 出行喜好（例：喜欢酒店礼宾车、自己开车）
+  transportRestriction      String? // 出行限制（例：不坐网约车、不能长途车）
+
+  culturePrivacyPreference  String? // 文化 / 隐私方面的正向偏好（例：喜欢鲜花、喜欢艺术推荐）
+  culturePrivacyRestriction String? // 文化 / 隐私方面的忌讳（例：忌讳数字 4，不拍小孩照片）
+
+  otherPreference           String? // 其他喜好
+  otherRestriction          String? // 其他需要避免的事项
 
   tier         String?
   room         String?
@@ -45,9 +55,6 @@ model VipGuest {
   checkOutDate DateTime?
   segment      String?
   statusLabel  String?
-
-  // notes 不再需要，可以删掉；如果你 schema 里还在，请把这一行删除
-  // notes        String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -72,7 +79,7 @@ model Session {
   channel String @default("wechat") // wechat / whatsapp / line ...
 
   lastMsgAt      DateTime? // 用来排序（最新消息时间）
-  lastMsgPreview String? // 列表里显示的最后一条摘要
+  lastMsgPreview String?   // 列表里显示的最后一条摘要
   unreadCount    Int       @default(0)
 
   // 用户在 H5 页面输入的 VIP 号（冗余一份，方便查）
@@ -103,8 +110,8 @@ model Message {
   msgId          String   @unique
   openKfid       String
   externalUserId String
-  origin         String? // 来源标记（比如 "wecom"），可选
-  msgType        String // text / image / event ...
+  origin         String?  // 来源标记（比如 "wecom"），可选
+  msgType        String   // text / image / event ...
   sendTime       DateTime // 企业微信那边的发送时间
 
   // 原来是 Json，这里用 String 存 JSON 字符串就好
@@ -128,17 +135,17 @@ model Message {
   @@index([openKfid, externalUserId, sendTime])
 }
 
+// /vip-access 提交之后进入的 PendingApproval 队列
 model PendingApproval {
   id String @id @default(cuid())
 
-  // 关联到哪个 VIP
+  // 关联到哪个 VIP（用户输入的 VIP 号，可能对也可能错）
   vipNumber  String
   vipGuestId String?
   vipGuest   VipGuest? @relation(fields: [vipGuestId], references: [id])
 
-  /// 用户在 /vip-access 填的内容，用来人工核对
+  /// 用户在 /vip-access 填的称呼，用来人工核对
   inputPreferredName String?
-  inputBirthdayMd    String? // 用户输入的 MMDD，比如 "0323"
 
   /// 当前 POC 版本 & 入口模式 & 扫码渠道
   /// version:     'hybrid' | 'h5'
@@ -147,6 +154,12 @@ model PendingApproval {
   version     String
   entryMode   String
   scanChannel String
+
+  /// 风险等级 & 匹配提示
+  /// riskLevel: 'LOW' | 'MEDIUM' | 'HIGH'
+  /// matchHint: 'VIP_NUMBER_MATCH' | 'NAME_CANDIDATES' | 'NO_MATCH' | ...
+  riskLevel String?
+  matchHint String?
 
   /// 审批状态
   /// 'PENDING'  : 待审核

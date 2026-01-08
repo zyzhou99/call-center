@@ -154,6 +154,7 @@ function InboxContent() {
 
   // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
   // 不在 VIP Requests 视图时启用；在 VIP Requests 视图里交给 VipRequestsView 回传
+    // 🔔 全局輪詢 Pending 數，驅動左側 VIP Requests 小紅點
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -163,13 +164,10 @@ function InboxContent() {
         const res = await fetch("/api/vip/approvals");
         const data: VipRequestsResponse = await res.json();
 
-        if (stopped || !data?.ok) return;
+        if (!data?.ok || stopped) return;
 
-        const list = Array.isArray(data.items)
-          ? data.items
-          : Array.isArray(data.approvals)
-          ? data.approvals
-          : [];
+        const list: VipRequestApi[] =
+          (Array.isArray(data.items) ? data.items : data.approvals) ?? [];
 
         const pending = list.filter((r) => r.status === "PENDING").length;
         setVipPendingCount(pending);
@@ -178,16 +176,16 @@ function InboxContent() {
       }
     };
 
-    if (activeChannel !== "vipRequests") {
-      fetchPendingCount();
-      timer = setInterval(fetchPendingCount, 15000); // 每 15 秒拉一次
-    }
+    // 進頁先拉一次，之後每 5 秒拉一次
+    fetchPendingCount();
+    timer = setInterval(fetchPendingCount, 5000);
 
     return () => {
       stopped = true;
       if (timer) clearInterval(timer);
     };
-  }, [activeChannel]);
+  }, []);
+
 
   // 加载 +（在 wechat channel 下）轮询企业微信会话列表
   useEffect(() => {
@@ -311,14 +309,14 @@ function InboxContent() {
 
   // 左侧栏未读数（包含 vipRequests）
   const unreadCounts = useMemo(() => {
-    const counts: Record<Channel, number> = {
+    const counts: Record<InboxChannel, number> = {
       wechat: 0,
       whatsapp: 0,
       line: 0,
       webchat: 0,
       email: 0,
       phone: 0,
-      vipRequests: 0,
+      vipRequests: vipPendingCount,
     };
 
     mockConvs.forEach((conv) => {
@@ -329,11 +327,9 @@ function InboxContent() {
       counts.wechat += conv.unreadCount;
     });
 
-    // VIP Requests 的未读 = 当前所有 PENDING 请求数量
-    counts.vipRequests = vipPendingCount;
-
     return counts;
   }, [mockConvs, wecomConversations, vipPendingCount]);
+
 
   // 全部会话（用于搜索、activeConversation、选会话）
   const allConversations: Conversation[] = useMemo(

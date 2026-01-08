@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import vipLogin from "@/assets/vip-login1.png";
 
-// 10 分鐘復用窗口
+// 10 分钟复用窗口
 const REUSE_WINDOW_MS = 10 * 60 * 1000;
 
 type VersionType = "hybrid" | "h5";
@@ -17,13 +17,13 @@ interface SubmitResponse {
   ok: boolean;
   pendingId?: string;
   error?: string;
+  riskLevel?: string;
 }
 
 interface SavedPendingState {
   pendingId: string;
   vipNumber: string;
   preferredName: string | null;
-  birthdayMd: string;
   ts: number;
   version: VersionType;
   entryMode: EntryMode;
@@ -39,13 +39,9 @@ const TEXTS: Record<
     vipPlaceholder: string;
     nameLabel: string;
     namePlaceholder: string;
-    birthdayLabel: string;
-    birthdayHint: string;
-    birthdayPlaceholder: string;
     buttonIdle: string;
     buttonLoading: string;
     errorMissingFields: string;
-    errorInfoMismatch: string;
     errorServer: string;
     errorNetwork: string;
     genericError: string;
@@ -57,20 +53,14 @@ const TEXTS: Record<
   en: {
     title: "Wynn Palace · VIP Concierge",
     subtitle:
-      "For your account security, please enter your VIP card number and birthday so that our concierge can verify your identity.",
+      "Please enter your VIP card number and preferred name so our concierge can recognize you and offer personalized assistance.",
     vipLabel: "VIP CARD NUMBER",
     vipPlaceholder: "10001",
-    nameLabel: "PREFERRED NAME",
+    nameLabel: "PREFERRED NAME (OPTIONAL)",
     namePlaceholder: "Alex",
-    birthdayLabel: "BIRTHDAY (MMDD)",
-    birthdayHint: "For verification only, e.g. 0323",
-    birthdayPlaceholder: "0323",
     buttonIdle: "Connect",
-    buttonLoading: "VERIFYING...",
-    errorMissingFields:
-      "Please fill in both your VIP card number and birthday.",
-    errorInfoMismatch:
-      "The VIP card number or birthday does not match our records. Please check and try again.",
+    buttonLoading: "SUBMITTING...",
+    errorMissingFields: "Please fill in your VIP card number.",
     errorServer: "Service is temporarily unavailable. Please try again later.",
     errorNetwork: "Network error. Please try again.",
     genericError: "Request failed. Please try again.",
@@ -81,18 +71,14 @@ const TEXTS: Record<
   "zh-Hant": {
     title: "永利皇宮 · VIP 禮賓服務",
     subtitle:
-      "為確保您的帳戶安全，請輸入您的 VIP 卡號與生日，以便禮賓為您核實身份。",
+      "為了讓禮賓更快速識別您，請輸入您的 VIP 卡號與稱呼，方便我們為您提供更貼心的服務。",
     vipLabel: "VIP 卡號",
     vipPlaceholder: "10001",
     nameLabel: "稱呼（選填）",
     namePlaceholder: "Alex / 張先生",
-    birthdayLabel: "生日（MMDD）",
-    birthdayHint: "僅用於核驗，例如：0323",
-    birthdayPlaceholder: "0323",
     buttonIdle: "連接專屬禮賓",
-    buttonLoading: "驗證中...",
-    errorMissingFields: "請填寫完整的 VIP 卡號與生日。",
-    errorInfoMismatch: "您輸入的 VIP 卡號或生日與系統不符，請檢查後重新輸入。",
+    buttonLoading: "提交中...",
+    errorMissingFields: "請填寫 VIP 卡號。",
     errorServer: "服務暫時無法使用，請稍後再試。",
     errorNetwork: "網路異常，請稍後再試。",
     genericError: "請求未成功，請稍後再試。",
@@ -110,14 +96,13 @@ export default function VipAccessPage() {
 
   const [vipNumber, setVipNumber] = useState("");
   const [preferredName, setPreferredName] = useState("");
-  const [birthdayMd, setBirthdayMd] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const [entryMode, setEntryMode] = useState<EntryMode>("h5");
   const [scanChannel, setScanChannel] = useState<ScanChannel>("browser");
 
-  // 從 URL 讀 version，預設 hybrid
+  // 从 URL 读 version，默认 hybrid
   const version: VersionType = useMemo(() => {
     const v = searchParams.get("version");
     if (v === "h5") return "h5";
@@ -126,7 +111,7 @@ export default function VipAccessPage() {
 
   const t = TEXTS[language];
 
-  // 入口模式識別：WeChat / 瀏覽器 + version
+  // 入口模式识别：WeChat / 浏览器 + version
   useEffect(() => {
     if (typeof navigator === "undefined") return;
     const ua = navigator.userAgent || "";
@@ -141,7 +126,7 @@ export default function VipAccessPage() {
     }
   }, [version]);
 
-  // 頁面載入時檢查 10 分鐘內是否有 pending 記錄，有的話直接跳到 /vip-pending
+  // 页面加载时，检查 10 分钟内是否有 pending 记录，有的话直接跳到 /vip-pending
   useEffect(() => {
     if (typeof window === "undefined") return;
 
@@ -158,6 +143,7 @@ export default function VipAccessPage() {
         return;
       }
 
+      // 10 分鐘內：直接復用上一次的 pendingId
       router.replace(
         `/vip-pending?pendingId=${encodeURIComponent(saved.pendingId)}`
       );
@@ -166,28 +152,12 @@ export default function VipAccessPage() {
     }
   }, [router]);
 
-  function normalizeBirthdayMd(input: string): string | null {
-    if (!input) return null;
-    const digits = input.replace(/\D/g, "");
-    if (!digits) return null;
-    if (digits.length === 4) return digits;
-    if (digits.length === 3) return digits.padStart(4, "0");
-    if (digits.length === 2) {
-      // 像 "323" 輸錯成 "32" 的情況，先不自動糾正，返回原值讓後端判錯
-      return digits;
-    }
-    return digits;
-  }
-
   function translateError(error?: string): string {
     if (!error) return t.genericError;
 
     switch (error) {
       case "INVALID_INPUT":
-      case "INVALID_BIRTHDAY_FORMAT":
-      case "VIP_NOT_FOUND":
-      case "VIP_INFO_MISMATCH":
-        return t.errorInfoMismatch;
+        return t.errorMissingFields;
       case "SERVER_ERROR":
         return t.errorServer;
       default:
@@ -199,19 +169,16 @@ export default function VipAccessPage() {
     e.preventDefault();
     setErrorMsg(null);
 
-    if (!vipNumber.trim() || !birthdayMd.trim()) {
+    if (!vipNumber.trim()) {
       setErrorMsg(t.errorMissingFields);
       return;
     }
 
     setLoading(true);
     try {
-      const normalized = normalizeBirthdayMd(birthdayMd);
-
       const body = {
         vipNumber: vipNumber.trim(),
         preferredName: preferredName.trim() || undefined,
-        birthdayMd: normalized ?? birthdayMd.trim(),
         version,
         entryMode,
         scanChannel,
@@ -238,7 +205,6 @@ export default function VipAccessPage() {
             pendingId: data.pendingId,
             vipNumber: vipNumber.trim(),
             preferredName: preferredName.trim() || null,
-            birthdayMd: normalized ?? birthdayMd.trim(),
             ts: Date.now(),
             version,
             entryMode,
@@ -345,21 +311,6 @@ export default function VipAccessPage() {
               />
             </div>
 
-            {/* BIRTHDAY (MMDD) */}
-            <div className="space-y-2">
-              <label className="block text-[11px] font-semibold tracking-[0.18em] text-[#c79b4a] uppercase">
-                {t.birthdayLabel}
-              </label>
-              <input
-                value={birthdayMd}
-                onChange={(e) => setBirthdayMd(e.target.value)}
-                placeholder={t.birthdayPlaceholder}
-                className="w-full px-5 py-3.5 rounded-[8px] border border-[#d3a65b] bg-[#fffaf2] text-[16px] text-[#32261c] shadow-sm focus:outline-none focus:ring-2 focus:ring-[#d3a65b] focus:border-transparent"
-                required
-              />
-              <p className="text-[11px] text-[#a38b6a]">{t.birthdayHint}</p>
-            </div>
-
             {/* 錯誤提示 */}
             {errorMsg && (
               <div className="mt-2 rounded-xl border border-red-100 bg-red-50 px-4 py-3 text-[11px] text-red-700">
@@ -370,7 +321,7 @@ export default function VipAccessPage() {
             {/* Connect 按鈕 */}
             <button
               type="submit"
-              disabled={loading || !vipNumber.trim() || !birthdayMd.trim()}
+              disabled={loading || !vipNumber.trim()}
               className="mt-4 w-full py-3.5 rounded-[8px] text-[14px] font-semibold tracking-[0.18em] uppercase disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background:
