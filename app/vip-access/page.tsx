@@ -17,6 +17,8 @@ interface SubmitResponse {
   ok: boolean;
   pendingId?: string;
   error?: string;
+  // 後端現在還會返回 matchHint（生日是否匹配的提示），這裡先不在 UI 顯示
+  matchHint?: string;
 }
 
 interface SavedPendingState {
@@ -28,6 +30,7 @@ interface SavedPendingState {
   version: VersionType;
   entryMode: EntryMode;
   scanChannel: ScanChannel;
+  channelIdentifier?: string;
 }
 
 const TEXTS: Record<
@@ -116,6 +119,8 @@ export default function VipAccessPage() {
 
   const [entryMode, setEntryMode] = useState<EntryMode>("h5");
   const [scanChannel, setScanChannel] = useState<ScanChannel>("browser");
+  const [channelIdentifier, setChannelIdentifier] = useState<string | null>(null);
+
 
   // 從 URL 讀 version，預設 hybrid
   const version: VersionType = useMemo(() => {
@@ -166,27 +171,49 @@ export default function VipAccessPage() {
     }
   }, [router]);
 
+  // 初始化 H5 / Web 渠道的唯一 ID（browserId）
+  // 同一個瀏覽器只生成一次，存在 localStorage
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const KEY = "vip_browser_id";
+
+    try {
+      let id = window.localStorage.getItem(KEY);
+      if (!id) {
+        if (window.crypto?.randomUUID) {
+          id = window.crypto.randomUUID();
+        } else {
+          id = `b_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+        }
+        window.localStorage.setItem(KEY, id);
+      }
+      setChannelIdentifier(id);
+    } catch (e) {
+      console.error("Failed to init browserId / channelIdentifier", e);
+    }
+  }, []);
+
+  // 和後端一樣的 birthday 標準化：輸入 3/23、0323 等都整理成 "MMDD"
   function normalizeBirthdayMd(input: string): string | null {
     if (!input) return null;
     const digits = input.replace(/\D/g, "");
     if (!digits) return null;
-    if (digits.length === 4) return digits;
+    if (digits.length >= 4) return digits.slice(-4);
     if (digits.length === 3) return digits.padStart(4, "0");
-    if (digits.length === 2) {
-      // 像 "323" 輸錯成 "32" 的情況，先不自動糾正，返回原值讓後端判錯
-      return digits;
-    }
+    // 其它奇怪長度就原樣丟給後端
     return digits;
   }
 
+  // ✅ 配合新的 /api/vip/submit 錯誤碼
   function translateError(error?: string): string {
     if (!error) return t.genericError;
 
     switch (error) {
-      case "INVALID_INPUT":
-      case "INVALID_BIRTHDAY_FORMAT":
+      case "MISSING_VIP_NUMBER":
+        return t.errorMissingFields;
       case "VIP_NOT_FOUND":
-      case "VIP_INFO_MISMATCH":
+        // VIP 號根本不存在：用「卡號 / 生日與系統不符」這個文案就好
         return t.errorInfoMismatch;
       case "SERVER_ERROR":
         return t.errorServer;
@@ -199,6 +226,7 @@ export default function VipAccessPage() {
     e.preventDefault();
     setErrorMsg(null);
 
+    // 前端仍然要求 VIP + 生日都填寫
     if (!vipNumber.trim() || !birthdayMd.trim()) {
       setErrorMsg(t.errorMissingFields);
       return;
@@ -215,6 +243,7 @@ export default function VipAccessPage() {
         version,
         entryMode,
         scanChannel,
+        channelIdentifier: channelIdentifier ?? undefined,
       };
 
       const res = await fetch("/api/vip/submit", {
@@ -243,6 +272,7 @@ export default function VipAccessPage() {
             version,
             entryMode,
             scanChannel,
+            channelIdentifier: channelIdentifier ?? undefined,
           };
           window.localStorage.setItem(
             "vip_access_last_pending",

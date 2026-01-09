@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 
 type VipRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
@@ -27,6 +27,11 @@ interface VipRequestItem {
   entryMode: string;
   scanChannel: string;
   createdAt: string;
+
+  // 這兩個字段暫時後端未必有，但先留著
+  channelIdentifier?: string | null;
+  nicknameFromChannel?: string | null;
+
   vipGuest?: VipGuestLite | null;
 }
 
@@ -44,6 +49,79 @@ interface VipRequestsViewProps {
   onPendingCountChange?: (count: number) => void;
 }
 
+// ------ helpers ------
+
+const formatDate = (iso?: string | null) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toISOString().slice(0, 10);
+};
+
+const formatTime = (iso?: string | null) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
+
+const formatDateTime = (iso?: string | null) => {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return `${d.toISOString().slice(0, 10)} ${d.toLocaleTimeString(
+    "en-US",
+    { hour: "2-digit", minute: "2-digit" }
+  )}`;
+};
+
+const formatBirthday = (md?: string | null) => {
+  if (!md) return "—";
+  const s = md.replace(/\D/g, "").padStart(4, "0");
+  return `${s.slice(0, 2)}-${s.slice(2)}`;
+};
+
+const normalizeStr = (v?: string | null) =>
+  (v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
+const isDiff = (dbValue?: string | null, inputValue?: string | null) => {
+  if (!dbValue || !inputValue) return false;
+  return normalizeStr(dbValue) !== normalizeStr(inputValue);
+};
+
+const getStatusChipStyle = (status: VipRequestStatus) => {
+  switch (status) {
+    case "PENDING":
+      return {
+        label: "Pending",
+        className: "bg-[#F6E4BD] text-[#7A5A22]",
+      };
+    case "APPROVED":
+      return {
+        label: "Approved",
+        className: "bg-[#D5F3CC] text-[#296526]",
+      };
+    case "REJECTED":
+      return {
+        label: "Rejected",
+        className: "bg-[#FDE2E0] text-[#B91C1C]",
+      };
+    case "EXPIRED":
+      return {
+        label: "Expired",
+        className: "bg-gray-200 text-gray-600",
+      };
+    default:
+      return {
+        label: status,
+        className: "bg-gray-200 text-gray-600",
+      };
+  }
+};
+
 export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) {
   const [requests, setRequests] = useState<VipRequestItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -56,111 +134,68 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ------- helpers -------
-
-  const formatDate = (iso?: string | null) => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "—";
-    return d.toISOString().slice(0, 10);
-  };
-
-  const formatTime = (iso?: string | null) => {
-    if (!iso) return "—";
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return "—";
-    return d.toLocaleTimeString("en-US", {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  };
-
-  const formatBirthday = (md?: string | null) => {
-    if (!md) return "—";
-    const s = md.replace(/\D/g, "").padStart(4, "0");
-    return `${s.slice(0, 2)}-${s.slice(2)}`;
-  };
-
-  const getStatusChipStyle = (status: VipRequestStatus) => {
-    switch (status) {
-      case "PENDING":
-        return {
-          label: "PENDING",
-          className: "bg-[#F6E4BD] text-[#7A5A22]",
-        };
-      case "APPROVED":
-        return {
-          label: "APPROVED",
-          className: "bg-[#D5F3CC] text-[#296526]",
-        };
-      case "REJECTED":
-        return {
-          label: "REJECTED",
-          className: "bg-[#FDE2E0] text-[#B91C1C]",
-        };
-      case "EXPIRED":
-        return {
-          label: "EXPIRED",
-          className: "bg-gray-200 text-gray-600",
-        };
-      default:
-        return {
-          label: status,
-          className: "bg-gray-200 text-gray-600",
-        };
-    }
-  };
-
   // ------- data fetching -------
 
-  const refresh = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch("/api/vip/approvals");
-      const data: VipApprovalsApiResponse = await res.json();
-
-      if (!data?.ok) {
-        throw new Error(data?.error ?? "REQUEST_FAILED");
+  const refresh = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      const silent = opts?.silent ?? false;
+      if (!silent) {
+        setLoading(true);
+        setError(null);
       }
 
-      const list: VipRequestItem[] =
-        (Array.isArray(data.items) ? data.items : data.approvals) ?? [];
+      try {
+        const res = await fetch("/api/vip/approvals");
+        const data: VipApprovalsApiResponse = await res.json();
 
-      // 最新的在上面
-      list.sort(
-        (a, b) =>
-          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-      );
+        if (!data?.ok) {
+          throw new Error(data?.error ?? "REQUEST_FAILED");
+        }
 
-      setRequests(list);
+        const list: VipRequestItem[] =
+          (Array.isArray(data.items) ? data.items : data.approvals) ?? [];
 
-      const pendingCount = list.filter((r) => r.status === "PENDING").length;
-      onPendingCountChange?.(pendingCount);
+        // 最新在上
+        list.sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
 
-      // 没有选中的时候默认选第一条
-      if (!activeId && list.length > 0) {
-        setActiveId(list[0].id);
+        setRequests(list);
+
+        const pendingCount = list.filter((r) => r.status === "PENDING").length;
+        onPendingCountChange?.(pendingCount);
+
+        return list;
+      } catch (e) {
+        console.error("load vip approvals failed:", e);
+        if (!opts?.silent) {
+          setError("Failed to load VIP requests.");
+        }
+        return [];
+      } finally {
+        if (!opts?.silent) {
+          setLoading(false);
+        }
+        setActionLoadingId(null);
       }
-    } catch (e) {
-      console.error("load vip approvals failed:", e);
-      setError("Failed to load VIP requests.");
-    } finally {
-      setLoading(false);
-      setActionLoadingId(null);
-    }
-  };
+    },
+    [onPendingCountChange]
+  );
 
+  // 首次加载
   useEffect(() => {
     void refresh();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [refresh]);
 
-  // 如果列表本身变化了，也同步更新 pending 数
+  // 每 5 秒靜默刷新一次列表（不打斷當前選中）
   useEffect(() => {
-    const pendingCount = requests.filter((r) => r.status === "PENDING").length;
-    onPendingCountChange?.(pendingCount);
-  }, [requests, onPendingCountChange]);
+    const timer = setInterval(() => {
+      void refresh({ silent: true });
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [refresh]);
 
   // ------- filters & derived state -------
 
@@ -197,22 +232,26 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
     });
   }, [requests, statusTab, channelFilter, search]);
 
-  const activeRequest: VipRequestItem | null = useMemo(() => {
-    if (!requests.length) return null;
-
-    const byId =
-      requests.find((r) => r.id === activeId) ??
-      filteredRequests[0] ??
-      requests[0];
-
-    return byId ?? null;
-  }, [requests, filteredRequests, activeId]);
-
+  // 根據「當前過濾後的列表」來決定 activeId
   useEffect(() => {
-    if (!activeRequest && filteredRequests.length > 0) {
+    if (!filteredRequests.length) {
+      if (activeId !== null) setActiveId(null);
+      return;
+    }
+
+    const existsInFiltered = activeId
+      ? filteredRequests.some((r) => r.id === activeId)
+      : false;
+
+    if (!existsInFiltered) {
       setActiveId(filteredRequests[0].id);
     }
-  }, [activeRequest, filteredRequests]);
+  }, [filteredRequests, activeId]);
+
+  const activeRequest: VipRequestItem | null = useMemo(() => {
+    if (!activeId) return null;
+    return requests.find((r) => r.id === activeId) ?? null;
+  }, [requests, activeId]);
 
   // ------- actions -------
 
@@ -236,7 +275,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
         throw new Error(data?.error ?? "ACTION_FAILED");
       }
 
-      // 動作完成後重新拉列表（會帶動小紅點更新）
+      // 完成後刷新列表，會觸發上面的 useEffect 自動跳到下一條 PENDING
       await refresh();
     } catch (e) {
       console.error("update approval failed:", e);
@@ -277,6 +316,16 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
     );
   };
 
+  const displayName =
+    activeRequest &&
+    (activeRequest.inputPreferredName ||
+      activeRequest.vipGuest?.preferredName ||
+      activeRequest.vipGuest?.fullName ||
+      `VIP ${activeRequest.vipNumber}`);
+
+  const statusChip =
+    activeRequest && getStatusChipStyle(activeRequest.status);
+
   // ------- UI -------
 
   return (
@@ -292,7 +341,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
           borderRightColor: "var(--divider)",
         }}
       >
-        {/* 頂部標題 + tabs + channel filter */}
+        {/* header */}
         <div
           className="px-4 pt-4 pb-3 border-b"
           style={{ borderBottomColor: "var(--divider)" }}
@@ -310,8 +359,8 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
             <div className="flex items-center gap-1.5">
               {renderStatusTab("PENDING", "Pending", stats.pending)}
               {renderStatusTab("ALL", "All", stats.all)}
-              {renderStatusTab("APPROVED", "Approve", stats.approved)}
-              {renderStatusTab("REJECTED", "Reject", stats.rejected)}
+              {renderStatusTab("APPROVED", "Approved", stats.approved)}
+              {renderStatusTab("REJECTED", "Rejected", stats.rejected)}
             </div>
           </div>
 
@@ -340,8 +389,9 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
               className="w-full px-3 py-1.5 rounded-md text-[11px] border bg-white focus:outline-none focus:ring-1"
               style={{
                 borderColor: "var(--divider)",
+                // @ts-expect-error: css var
                 "--tw-ring-color": "var(--accent)",
-              } as React.CSSProperties}
+              }}
             />
           </div>
         </div>
@@ -370,7 +420,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                 .toUpperCase()
                 .slice(0, 2);
 
-              const statusChip = getStatusChipStyle(req.status);
+              const chip = getStatusChipStyle(req.status);
 
               return (
                 <button
@@ -414,10 +464,10 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                       <span
                         className={cn(
                           "ml-2 px-2 py-0.5 rounded-full text-[9px] font-medium flex-shrink-0",
-                          statusChip.className
+                          chip.className
                         )}
                       >
-                        {statusChip.label}
+                        {chip.label}
                       </span>
                     </div>
                   </div>
@@ -432,85 +482,133 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
       <div className="flex-1 flex flex-col">
         {activeRequest ? (
           <>
-            {/* 上半身：大頭像 + 名字 + 狀態 */}
-            <div className="px-16 pt-10 pb-4">
+            {/* 頂部：名字 + 狀態 + 大頭像 */}
+            <div className="px-16 pt-8 pb-6">
               <div className="flex items-center justify-between mb-6">
                 <div className="flex items-center gap-3">
                   <h2 className="text-lg font-semibold text-[#3a3023]">
-                    {activeRequest.inputPreferredName ||
-                      activeRequest.vipGuest?.preferredName ||
-                      activeRequest.vipGuest?.fullName ||
-                      `VIP ${activeRequest.vipNumber}`}
+                    {displayName}
                   </h2>
-                  <span
-                    className={cn(
-                      "px-3 py-1 rounded-full text-[10px] font-medium",
-                      getStatusChipStyle(activeRequest.status).className
-                    )}
-                  >
-                    {getStatusChipStyle(activeRequest.status).label}
-                  </span>
+                  {statusChip && (
+                    <span
+                      className={cn(
+                        "px-3 py-1 rounded-full text-[10px] font-medium",
+                        statusChip.className
+                      )}
+                    >
+                      {statusChip.label}
+                    </span>
+                  )}
+                </div>
+                <div className="text-[11px] text-[#9b8773]">
+                  Request Time: {formatDateTime(activeRequest.createdAt)}
                 </div>
               </div>
 
-              <div className="flex flex-col items-center mt-4 mb-8">
+              <div className="flex flex-col items-center mb-10">
                 <div
                   className="w-20 h-20 rounded-full flex items-center justify-center text-xl font-medium mb-3"
                   style={{ backgroundColor: "#F4E7D4", color: "#7A5A22" }}
                 >
-                  {(
-                    activeRequest.inputPreferredName ||
-                    activeRequest.vipGuest?.preferredName ||
-                    activeRequest.vipGuest?.fullName ||
-                    "VIP"
-                  )
+                  {(displayName ?? "VIP")
                     .split(" ")
                     .map((n) => n[0])
                     .join("")
                     .toUpperCase()
                     .slice(0, 2)}
                 </div>
-                <div className="text-sm text-[#8b7561] mb-1">
-                  {activeRequest.vipGuest?.statusLabel || "Not Checked In"}
-                </div>
-                <div className="px-3 py-1 rounded-full text-[10px] font-medium bg-[#F6E4BD] text-[#7A5A22]">
-                  VIP
+                <div className="px-3 py-1 rounded-full text-[11px] font-medium bg-[#F6E4BD] text-[#7A5A22]">
+                  VIP&nbsp;|&nbsp;{activeRequest.vipNumber}
                 </div>
               </div>
 
-              {/* 下半：兩欄信息 */}
-              <div className="grid grid-cols-2 gap-16 text-[13px] text-[#4b3a2b]">
-                {/* Guest Details */}
-                <div>
-                  <div className="text-[11px] font-semibold tracking-[0.2em] text-[#b28a4a] uppercase mb-3">
-                    Guest Details
+              {/* Guest Verified 區塊 */}
+              <section className="mb-8">
+                <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
+                  Guest Verified
+                </div>
+
+                <div className="w-full overflow-hidden rounded-xl border border-[#f1e4cf] bg-white text-[12px]">
+                  <div className="grid grid-cols-[140px,1fr,1fr] border-b border-[#f1e4cf] bg-[#faf5ec] text-[#8b7561]">
+                    <div className="px-4 py-2 font-semibold">Field</div>
+                    <div className="px-4 py-2 font-semibold">
+                      Database Match
+                    </div>
+                    <div className="px-4 py-2 font-semibold">
+                      New Application
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Row label="VIP Number" value={activeRequest.vipNumber} />
-                    <Row
-                      label="Birthday (input)"
-                      value={formatBirthday(activeRequest.inputBirthdayMd)}
-                    />
+
+                  {/* Preferred Name */}
+                  <CompareRow
+                    field="Preferred Name"
+                    dbValue={
+                      activeRequest.vipGuest?.preferredName ??
+                      activeRequest.vipGuest?.fullName ??
+                      ""
+                    }
+                    inputValue={activeRequest.inputPreferredName ?? ""}
+                  />
+
+                  {/* Birthday */}
+                  <CompareRow
+                    field="Birthday (MMDD)"
+                    dbValue={formatBirthday(
+                      activeRequest.vipGuest?.birthdayMd
+                    )}
+                    rawDb={activeRequest.vipGuest?.birthdayMd ?? undefined}
+                    inputValue={formatBirthday(activeRequest.inputBirthdayMd)}
+                    rawInput={activeRequest.inputBirthdayMd ?? undefined}
+                  />
+                </div>
+              </section>
+
+              {/* Guest Detail & Booking */}
+              <div className="grid grid-cols-2 gap-16 text-[13px] text-[#4b3a2b]">
+                {/* Guest Detail */}
+                <section>
+                  <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
+                    Guest Detail
+                  </div>
+                  <div className="space-y-1.5">
                     <Row
                       label="Channel"
                       value={renderChannelLabel(activeRequest.scanChannel)}
                     />
                     <Row
+                      label="Channel ID"
+                      value={activeRequest.channelIdentifier ?? "—"}
+                    />
+                    <Row
+                      label="Nickname"
+                      value={
+                        activeRequest.nicknameFromChannel ??
+                        activeRequest.inputPreferredName ??
+                        "—"
+                      }
+                    />
+                    <Row
+                      label="Preferred Name (input)"
+                      value={activeRequest.inputPreferredName ?? "—"}
+                    />
+                    <Row
                       label="Request Time"
-                      value={formatTime(activeRequest.createdAt)}
+                      value={formatDateTime(activeRequest.createdAt)}
                     />
                   </div>
-                </div>
+                </section>
 
-                {/* PMS Match */}
-                <div>
-                  <div className="text-[11px] font-semibold tracking-[0.2em] text-[#b28a4a] uppercase mb-3">
-                    System Match (PMS)
+                {/* Guest Booking / PMS */}
+                <section>
+                  <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
+                    Guest Booking (PMS)
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-1.5">
                     <Row
                       label="Guest Status"
-                      value={activeRequest.vipGuest?.statusLabel ?? "Not Checked in"}
+                      value={
+                        activeRequest.vipGuest?.statusLabel ?? "Not Checked In"
+                      }
                       alignRight
                     />
                     <Row
@@ -519,22 +617,22 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                       alignRight
                     />
                     <Row
-                      label="Room"
+                      label="Room No."
                       value={activeRequest.vipGuest?.room ?? "—"}
                       alignRight
                     />
                     <Row
-                      label="Check-in Date"
+                      label="Check-In"
                       value={formatDate(activeRequest.vipGuest?.checkInDate)}
                       alignRight
                     />
                     <Row
-                      label="Check-out Date"
+                      label="Check-Out"
                       value={formatDate(activeRequest.vipGuest?.checkOutDate)}
                       alignRight
                     />
                   </div>
-                </div>
+                </section>
               </div>
             </div>
 
@@ -589,14 +687,15 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
   );
 }
 
-// 小行 Row，用在右側兩欄
+// --------- 小行 Row ---------
 interface RowProps {
   label: string;
-  value: string;
+  value?: string | null;
   alignRight?: boolean;
 }
 
 function Row({ label, value, alignRight }: RowProps) {
+  const display = value && value !== "" ? value : "—";
   return (
     <div className="flex items-baseline justify-between">
       <span className="text-[12px] text-[#9b8773]">{label}</span>
@@ -606,8 +705,47 @@ function Row({ label, value, alignRight }: RowProps) {
           alignRight ? "text-right" : ""
         )}
       >
-        {value}
+        {display}
       </span>
+    </div>
+  );
+}
+
+// --------- 對比 Row（Database vs New Application）---------
+interface CompareRowProps {
+  field: string;
+  dbValue?: string | null;
+  inputValue?: string | null;
+  rawDb?: string;
+  rawInput?: string;
+}
+
+function CompareRow({
+  field,
+  dbValue,
+  inputValue,
+  rawDb,
+  rawInput,
+}: CompareRowProps) {
+  const displayDb = dbValue && dbValue !== "" ? dbValue : "—";
+  const displayInput = inputValue && inputValue !== "" ? inputValue : "—";
+
+  const diff = isDiff(rawDb ?? dbValue ?? "", rawInput ?? inputValue ?? "");
+
+  return (
+    <div className="grid grid-cols-[140px,1fr,1fr] border-t border-[#f1e4cf] text-[#3a3023]">
+      <div className="px-4 py-2 bg-[#fbf7ef] text-[12px] text-[#9b8773]">
+        {field}
+      </div>
+      <div className="px-4 py-2 text-[13px]">{displayDb}</div>
+      <div className="px-4 py-2 flex items-center gap-2 text-[13px]">
+        <span>{displayInput}</span>
+        {diff && (
+          <span className="px-2 py-0.5 rounded-full text-[10px] font-medium border border-[#f08a4b] text-[#b45309] bg-[#fff4e8]">
+            DIFF
+          </span>
+        )}
+      </div>
     </div>
   );
 }

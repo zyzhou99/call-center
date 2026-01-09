@@ -8,8 +8,22 @@ interface RouteParams {
   params: { id: string };
 }
 
+// 随便定义一个 H5 用的 openKfId，主要用来跟 externalUserId 组成唯一键
+const H5_OPENKFID = "H5_WEBCHAT_DEMO";
+
+function buildWelcomeText(opts: {
+  preferredName?: string | null;
+  vipNumber: string;
+}) {
+  const name = opts.preferredName?.trim();
+  if (name) {
+    return `您好尊貴的 VIP ${name}，歡迎下榻永利皇宮，我是 Joye，很高興為您服務，請問今天有什麼可以幫到您？`;
+  }
+  return `您好尊貴的貴賓，歡迎下榻永利皇宮，我是 Joye，很高興為您服務，請問今天有什麼可以幫到您？`;
+}
+
 /**
- * 查單條 PendingApproval 給 /vip-pending 用：
+ * GET: 查單條 PendingApproval，給 /vip-pending 用
  * GET /api/vip/approvals/:id
  */
 export async function GET(_req: Request, { params }: RouteParams) {
@@ -76,9 +90,10 @@ export async function GET(_req: Request, { params }: RouteParams) {
  * 後台審批操作（Approve / Reject）：
  * POST /api/vip/approvals/:id
  *
- * body 可以是：
- * { action: "APPROVE" } 或 { action: "REJECT", reason?: string }
- * 也兼容 { status: "APPROVED" | "REJECTED", reason?: string }
+ * body:
+ * { action: "APPROVE" }
+ * { action: "REJECT", reason?: string }
+ * 也兼容 { status: "APPROVED" | "REJECTED" | "EXPIRED" }
  */
 export async function POST(req: Request, { params }: RouteParams) {
   try {
@@ -104,7 +119,7 @@ export async function POST(req: Request, { params }: RouteParams) {
         ? body.agentId.trim()
         : null;
 
-    // 兼容兩種寫法：action 或 status
+    // 兼容 action / status 兩種寫法
     if (!action && statusInput) {
       action = statusInput;
     }
@@ -139,9 +154,12 @@ export async function POST(req: Request, { params }: RouteParams) {
         );
     }
 
-    // 先確認這條申請存在
+    // 把這條申請拉出來（帶上 vipGuest，後面好組文案）
     const existing = await prisma.pendingApproval.findUnique({
       where: { id },
+      include: {
+        vipGuest: true,
+      },
     });
 
     if (!existing) {
@@ -151,17 +169,143 @@ export async function POST(req: Request, { params }: RouteParams) {
       );
     }
 
-    // TODO：未來在這裡補：Approve 時自動生成 Session / kfUrl / sessionId 等
-    // 目前先只更新狀態，讓按鈕恢復可用
+    const now = new Date();
 
+    // --------- 情況一：不是 APPROVED，只改狀態就好 ---------
+    if (nextStatus !== "APPROVED") {
+      const updated = await prisma.pendingApproval.update({
+        where: { id },
+        data: {
+          status: nextStatus,
+          reason: nextStatus === "REJECTED" ? reason : null,
+          assignedAgentId: agentId ?? "demo-agent",
+          assignedAt: now,
+        },
+        include: {
+          vipGuest: {
+            select: {
+              fullName: true,
+              preferredName: true,
+              tier: true,
+              room: true,
+            },
+          },
+        },
+      });
+
+      return NextResponse.json(
+        {
+          ok: true,
+          approval: {
+            id: updated.id,
+            status: updated.status,
+            reason: updated.reason,
+            kfUrl: updated.kfUrl,
+            sessionId: updated.sessionId,
+            vipNumber: updated.vipNumber,
+            version: updated.version,
+            entryMode: updated.entryMode,
+            scanChannel: updated.scanChannel,
+            createdAt: updated.createdAt,
+            vipGuest: updated.vipGuest,
+          },
+        },
+        { status: 200 }
+      );
+    }
+
+    // --------- 情況二：APPROVED，要為 H5 建會話 + 歡迎語 ---------
+
+    let sessionIdToUse: string | null = existing.sessionId ?? null;
+
+    // 目前我們只為 H5 入口（entryMode === 'h5'）創建 Session；
+    // WeCom 入口的會話是通過企業微信同步那條鏈路建的。
+    if (existing.entryMode === "h5") {
+      // 1) 準備 openKfId / externalUserId / channel
+      const openKfid = H5_OPENKFID;
+
+      // 優先用 inputChannelIdentifier（browserId），沒有就退回 vipNumber
+      const identifierSource =
+        existing.inputChannelIdentifier?.trim() || existing.vipNumber;
+      const externalUserId = `h5:${identifierSource}`;
+
+      // 這個必須跟 Inbox 裡 webchat channel 的名字一致
+      const channel = "webchat";
+
+      // 顯示用的名字
+      const displayName =
+        existing.inputPreferredName ||
+        existing.vipGuest?.preferredName ||
+        existing.vipGuest?.fullName ||
+        `VIP ${existing.vipNumber}`;
+
+      const welcomeText = buildWelcomeText({
+        preferredName:
+          existing.inputPreferredName ?? existing.vipGuest?.preferredName,
+        vipNumber: existing.vipNumber,
+      });
+
+      // 2) upsert 一條 Session（保證同一個 browserId 多次掃碼命中同一條）
+      const session = await prisma.session.upsert({
+        where: {
+          openKfid_externalUserId: {
+            openKfid,
+            externalUserId,
+          },
+        },
+        update: {
+          displayName,
+          channel,
+          vipNumber: existing.vipNumber,
+          vipGuestId: existing.vipGuestId,
+          lastMsgAt: now,
+          lastMsgPreview: welcomeText,
+        },
+        create: {
+          openKfid,
+          externalUserId,
+          displayName,
+          channel,
+          vipNumber: existing.vipNumber,
+          vipGuestId: existing.vipGuestId,
+          lastMsgAt: now,
+          lastMsgPreview: welcomeText,
+        },
+      });
+
+      sessionIdToUse = session.id;
+
+      // 3) 在 Message 裡插入一條系統歡迎語
+      await prisma.message.create({
+        data: {
+          msgId: `vip-welcome-${session.id}-${now.getTime()}`,
+          openKfid,
+          externalUserId,
+          origin: "system",
+          msgType: "text",
+          sendTime: now,
+          payload: JSON.stringify({
+            type: "system_welcome",
+            text: welcomeText,
+          }),
+          direction: "out",
+          text: welcomeText,
+          hasSensitive: false,
+          sensitiveHits: null,
+          sessionId: session.id,
+        },
+      });
+    }
+
+    // 4) 回填 PendingApproval 的狀態 & sessionId
     const updated = await prisma.pendingApproval.update({
       where: { id },
       data: {
         status: nextStatus,
-        // 只有 REJECTED 才保留 reason，其它情況清空
-        reason: nextStatus === "REJECTED" ? reason : null,
+        reason: null, // APPROVED 不存 reason
         assignedAgentId: agentId ?? "demo-agent",
-        assignedAt: new Date(),
+        assignedAt: now,
+        sessionId: sessionIdToUse,
       },
       include: {
         vipGuest: {

@@ -62,6 +62,9 @@ function InboxContent() {
     []
   );
 
+  // ✅ H5 / webchat 會話列表（從 Session 表來）
+  const [h5Conversations, setH5Conversations] = useState<Conversation[]>([]);
+
   // 所有 channel 的消息（wechat + mock）
   const [messagesState, setMessagesState] =
     useState<Record<string, Message[]>>(mockMessages);
@@ -152,8 +155,7 @@ function InboxContent() {
     })();
   }, [sessionIdFromUrl]);
 
-  // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
-  // 不在 VIP Requests 视图时启用；在 VIP Requests 视图里交给 VipRequestsView 回传
+  // 🔔 全局輪詢 Pending 數，驅動左側 VIP Requests 小紅點
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -163,31 +165,83 @@ function InboxContent() {
         const res = await fetch("/api/vip/approvals");
         const data: VipRequestsResponse = await res.json();
 
-        if (stopped || !data?.ok) return;
+        if (!data?.ok || stopped) return;
 
-        const list = Array.isArray(data.items)
-          ? data.items
-          : Array.isArray(data.approvals)
-          ? data.approvals
-          : [];
+        const list: VipRequestApi[] =
+          (Array.isArray(data.items) ? data.items : data.approvals) ?? [];
 
         const pending = list.filter((r) => r.status === "PENDING").length;
+
+        console.log("[pending-poll] raw list length =", list.length);
+        console.log("[pending-poll] pending count =", pending);
+
         setVipPendingCount(pending);
       } catch (e) {
         console.error("fetch vip pending count failed:", e);
       }
     };
 
-    if (activeChannel !== "vipRequests") {
-      fetchPendingCount();
-      timer = setInterval(fetchPendingCount, 15000); // 每 15 秒拉一次
-    }
+    fetchPendingCount();
+    timer = setInterval(fetchPendingCount, 5000);
 
     return () => {
       stopped = true;
       if (timer) clearInterval(timer);
     };
-  }, [activeChannel]);
+  }, []);
+
+  // ✅ 轮询 H5 / webchat 会话列表（從 Session 表來）
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+
+    const fetchH5Sessions = async () => {
+      try {
+        const resp = await fetch("/api/h5/sessions");
+        const data = await resp.json();
+        if (!data?.ok || stopped) return;
+
+        const rawList: any[] = data.sessions || [];
+
+        const convs: Conversation[] = rawList.map((s: any) => {
+          const displayName =
+            s.displayName ||
+            (s.vipGuest &&
+              ((s.vipGuest.preferredName as string) ||
+                (s.vipGuest.fullName as string))) ||
+            (s.vipNumber ? `VIP ${s.vipNumber}` : "") ||
+            s.id;
+
+          const conv: Conversation = {
+            id: s.id,
+            channel: "webchat",
+            displayName,
+            lastMessagePreview: s.lastMsgPreview || "",
+            unreadCount: 0, // 先不做未讀計算，後面可以再加
+            lastMessageAtLabel: "",
+            vip: false,
+            online: false,
+          };
+
+          (conv as any).vipGuest = s.vipGuest ?? null;
+
+          return conv;
+        });
+
+        setH5Conversations(convs);
+      } catch (e) {
+        console.error("load h5 sessions failed:", e);
+      }
+    };
+
+    fetchH5Sessions();
+    timer = setInterval(fetchH5Sessions, 5000);
+
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+    };
+  }, []);
 
   // 加载 +（在 wechat channel 下）轮询企业微信会话列表
   useEffect(() => {
@@ -296,6 +350,9 @@ function InboxContent() {
 
     if (activeChannel === "wechat") {
       base = wecomConversations;
+    } else if (activeChannel === "webchat") {
+      // ✅ webchat 用 H5 會話列表
+      base = h5Conversations;
     } else {
       base = mockConvs.filter((c) => c.channel === activeChannel);
     }
@@ -307,18 +364,18 @@ function InboxContent() {
       const bTimestamp = getLastMessageTimestamp(bMsgs);
       return bTimestamp - aTimestamp;
     });
-  }, [activeChannel, wecomConversations, mockConvs, messagesState]);
+  }, [activeChannel, wecomConversations, h5Conversations, mockConvs, messagesState]);
 
   // 左侧栏未读数（包含 vipRequests）
   const unreadCounts = useMemo(() => {
-    const counts: Record<Channel, number> = {
+    const counts: Record<InboxChannel, number> = {
       wechat: 0,
       whatsapp: 0,
       line: 0,
       webchat: 0,
       email: 0,
       phone: 0,
-      vipRequests: 0,
+      vipRequests: vipPendingCount,
     };
 
     mockConvs.forEach((conv) => {
@@ -329,16 +386,18 @@ function InboxContent() {
       counts.wechat += conv.unreadCount;
     });
 
-    // VIP Requests 的未读 = 当前所有 PENDING 请求数量
-    counts.vipRequests = vipPendingCount;
+    // ✅ 把 H5/webchat 的未讀數也算進來（目前都是 0，後面可以做真正未讀）
+    h5Conversations.forEach((conv) => {
+      counts.webchat += conv.unreadCount;
+    });
 
     return counts;
-  }, [mockConvs, wecomConversations, vipPendingCount]);
+  }, [mockConvs, wecomConversations, h5Conversations, vipPendingCount]);
 
   // 全部会话（用于搜索、activeConversation、选会话）
   const allConversations: Conversation[] = useMemo(
-    () => [...wecomConversations, ...mockConvs],
-    [wecomConversations, mockConvs]
+    () => [...wecomConversations, ...h5Conversations, ...mockConvs],
+    [wecomConversations, h5Conversations, mockConvs]
   );
 
   const activeConversation =
@@ -399,12 +458,13 @@ function InboxContent() {
   }, [searchQuery, allConversations, messagesState]);
 
   // 选会话
+    // 选会话
   const handleConversationSelect = async (conversationId: string) => {
     setActiveConversationId(conversationId);
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // 微信渠道：从后端拉消息 + 清未读 + 拉 VIP Profile
+    // ✅ 微信渠道：從後端拉消息 + 清未讀 + 拉 VIP Profile（保持不變）
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
@@ -460,7 +520,44 @@ function InboxContent() {
       return;
     }
 
-    // 非 wechat：mock 渠道
+    // ✅ H5 / webchat 渠道：從 Message 表拉消息 + 用同一個 VIP profile API
+    if (conv?.channel === "webchat") {
+      try {
+        const resp = await fetch(
+          `/api/h5/sessions/${encodeURIComponent(
+            conversationId
+          )}/messages?take=50`
+        );
+        const data = await resp.json();
+        if (data?.ok && Array.isArray(data.messages)) {
+          setMessagesState((prev) => ({
+            ...prev,
+            [conversationId]: data.messages,
+          }));
+        }
+      } catch (e) {
+        console.error("load h5/webchat messages failed:", e);
+      }
+
+      try {
+        const resp = await fetch(
+          `/api/vip/profile/${encodeURIComponent(conversationId)}`
+        );
+        const data = await resp.json();
+        if (data?.ok && data.profile) {
+          setActiveProfile(data.profile as GuestProfile);
+        } else {
+          setActiveProfile(null);
+        }
+      } catch (e) {
+        console.error("load VIP profile (webchat) failed:", e);
+        setActiveProfile(null);
+      }
+
+      return;
+    }
+
+    // 其它渠道（whatsapp / line / mock），保持你原來的 mock 行為
     setMockConvs((prevConversations) =>
       prevConversations.map((conv) =>
         conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
@@ -482,6 +579,7 @@ function InboxContent() {
 
     setActiveProfile(mockProfiles[conversationId] || null);
   };
+
 
   // 搜索结果点击
   const handleSearchResultSelect = (id: string) => {
@@ -546,13 +644,14 @@ function InboxContent() {
   }, [activeChannel, activeConversationId, allConversations]);
 
   // 发消息
+    // 发消息
   const handleSendMessage = async (text: string) => {
     if (!activeConversationId) return;
     const conversationId = activeConversationId;
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // 微信渠道：不做乐观更新，直接发给后端，等轮询把真实消息拉回来
+    // ✅ 微信渠道：用企業微信發送（保持原邏輯）
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
@@ -575,17 +674,56 @@ function InboxContent() {
       return;
     }
 
-    // 其它渠道（mock）
+    // ✅ webchat 渠道：寫入 H5 Message 表，讓 /vip-chat 也能看到
+    if (conv?.channel === "webchat") {
+      try {
+        const resp = await fetch(
+          `/api/h5/sessions/${encodeURIComponent(
+            conversationId
+          )}/messages`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text, from: "agent" }),
+          }
+        );
+        const data = await resp.json();
+
+        if (data?.ok && data.message) {
+          const m = data.message as any;
+
+          const newMessage: Message = {
+            id: m.id,
+            conversationId: m.conversationId,
+            direction: m.direction === "out" ? "out" : "in",
+            text: m.text || "",
+            timeLabel: m.timeLabel,
+            timestamp: m.timestamp,
+          };
+
+          setMessagesState((prev) => ({
+            ...prev,
+            [conversationId]: [...(prev[conversationId] || []), newMessage],
+          }));
+        }
+      } catch (e) {
+        console.error("send webchat message failed:", e);
+      }
+      return;
+    }
+
+    // 其它渠道（whatsapp / line / email / phone 仍用 mock）
+    const now = Date.now();
     const newMessage: Message = {
-      id: `m${Date.now()}`,
+      id: `m${now}`,
       conversationId,
       direction: "out",
       text,
-      timeLabel: new Date().toLocaleTimeString("en-US", {
+      timeLabel: new Date(now).toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
       }),
-      timestamp: Date.now(),
+      timestamp: now,
     };
 
     setMessagesState((prev) => ({
@@ -593,6 +731,7 @@ function InboxContent() {
       [conversationId]: [...(prev[conversationId] || []), newMessage],
     }));
   };
+
 
   const handleCloseConversation = () => {
     console.log("Close conversation");
