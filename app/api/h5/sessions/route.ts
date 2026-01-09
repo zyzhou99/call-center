@@ -26,10 +26,15 @@ export async function GET() {
     const payload = sessions.map((s) => ({
       id: s.id,
       channel: s.channel,
-      displayName: s.displayName,
+      displayName:
+        s.displayName ||
+        s.vipGuest?.preferredName ||
+        s.vipGuest?.fullName ||
+        `VIP ${s.vipNumber}`,
       lastMsgPreview: s.lastMsgPreview,
       vipNumber: s.vipNumber,
-      lastMsgAt: s.lastMsgAt ?? s.createdAt,
+      lastMsgAt: (s.lastMsgAt ?? s.createdAt).toISOString(),
+      unreadCount: s.unreadCount ?? 0,
       vipGuest: s.vipGuest
         ? {
             id: s.vipGuest.id,

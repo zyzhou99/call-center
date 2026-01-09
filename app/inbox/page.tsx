@@ -49,12 +49,11 @@ export default function InboxPage() {
 function InboxContent() {
   const searchParams = useSearchParams();
 
-  // 只支持具体渠道（含 vipRequests），不再有 "all"
   const [activeChannel, setActiveChannel] = useState<InboxChannel>("wechat");
   const [searchQuery, setSearchQuery] = useState("");
   const [vipPendingCount, setVipPendingCount] = useState(0);
 
-  // mock 会话（非微信）
+  // mock 会话（非微信、非 webchat 实会话）
   const [mockConvs, setMockConvs] = useState<Conversation[]>(mockConversations);
 
   // 真实 wechat 会话
@@ -62,10 +61,10 @@ function InboxContent() {
     []
   );
 
-  // ✅ H5 / webchat 會話列表（從 Session 表來）
+  // 真实 H5 / webchat 会话
   const [h5Conversations, setH5Conversations] = useState<Conversation[]>([]);
 
-  // 所有 channel 的消息（wechat + mock）
+  // 所有 channel 的消息（wechat + webchat + mock）
   const [messagesState, setMessagesState] =
     useState<Record<string, Message[]>>(mockMessages);
 
@@ -76,14 +75,18 @@ function InboxContent() {
   // 右侧 Guest Profile
   const [activeProfile, setActiveProfile] = useState<GuestProfile | null>(null);
 
-  // 记录：服务器返回的「总未读数」快照 & 本地「已读基线」
+  // WeCom 未读快照
   const wecomServerUnreadsRef = useRef<Record<string, number>>({});
   const wecomUnreadBaseRef = useRef<Record<string, number>>({});
 
-  // URL 里带进来的 sessionId（来自 /vip-access 跳转）
+  // H5 / webchat 未读快照
+  const h5ServerUnreadsRef = useRef<Record<string, number>>({});
+  const h5UnreadBaseRef = useRef<Record<string, number>>({});
+
+  // URL 里带进来的 sessionId（来自 /vip-access 跳转，目前用于 wechat）
   const sessionIdFromUrl = searchParams.get("sessionId");
 
-  // 初始化：从 localStorage 恢复上次的 channel（只恢复普通渠道，不强行跳 vipRequests）
+  // 初始化：从 localStorage 恢复上次的 channel
   useEffect(() => {
     if (typeof window === "undefined") return;
     const stored = window.localStorage.getItem(CHANNEL_STORAGE_KEY);
@@ -107,13 +110,12 @@ function InboxContent() {
     }
   };
 
-  // 如果从 /vip-access 带了 sessionId 上来：优先用它初始化当前会话 + 右侧 profile
+  // 如果从 /vip-access 带了 sessionId 上来：视为 wechat 会话（原有逻辑）
   useEffect(() => {
     if (!sessionIdFromUrl) return;
 
     const sessionId = sessionIdFromUrl;
 
-    // 切到 wechat 渠道
     setActiveChannel("wechat");
     setActiveConversationId(sessionId);
 
@@ -132,7 +134,6 @@ function InboxContent() {
         const profile = data.profile as GuestProfile;
         setActiveProfile(profile);
 
-        // 确保 wecomConversations 里至少有这一条会话
         setWecomConversations((prev) => {
           if (prev.some((c) => c.id === sessionId)) return prev;
 
@@ -155,7 +156,7 @@ function InboxContent() {
     })();
   }, [sessionIdFromUrl]);
 
-  // 🔔 全局輪詢 Pending 數，驅動左側 VIP Requests 小紅點
+  // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -172,9 +173,6 @@ function InboxContent() {
 
         const pending = list.filter((r) => r.status === "PENDING").length;
 
-        console.log("[pending-poll] raw list length =", list.length);
-        console.log("[pending-poll] pending count =", pending);
-
         setVipPendingCount(pending);
       } catch (e) {
         console.error("fetch vip pending count failed:", e);
@@ -190,60 +188,7 @@ function InboxContent() {
     };
   }, []);
 
-  // ✅ 轮询 H5 / webchat 会话列表（從 Session 表來）
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    let stopped = false;
-
-    const fetchH5Sessions = async () => {
-      try {
-        const resp = await fetch("/api/h5/sessions");
-        const data = await resp.json();
-        if (!data?.ok || stopped) return;
-
-        const rawList: any[] = data.sessions || [];
-
-        const convs: Conversation[] = rawList.map((s: any) => {
-          const displayName =
-            s.displayName ||
-            (s.vipGuest &&
-              ((s.vipGuest.preferredName as string) ||
-                (s.vipGuest.fullName as string))) ||
-            (s.vipNumber ? `VIP ${s.vipNumber}` : "") ||
-            s.id;
-
-          const conv: Conversation = {
-            id: s.id,
-            channel: "webchat",
-            displayName,
-            lastMessagePreview: s.lastMsgPreview || "",
-            unreadCount: 0, // 先不做未讀計算，後面可以再加
-            lastMessageAtLabel: "",
-            vip: false,
-            online: false,
-          };
-
-          (conv as any).vipGuest = s.vipGuest ?? null;
-
-          return conv;
-        });
-
-        setH5Conversations(convs);
-      } catch (e) {
-        console.error("load h5 sessions failed:", e);
-      }
-    };
-
-    fetchH5Sessions();
-    timer = setInterval(fetchH5Sessions, 5000);
-
-    return () => {
-      stopped = true;
-      if (timer) clearInterval(timer);
-    };
-  }, []);
-
-  // 加载 +（在 wechat channel 下）轮询企业微信会话列表
+  // 加载 + 轮询 WeCom 会话列表
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -259,7 +204,6 @@ function InboxContent() {
         const data = await resp.json();
         if (!data?.ok || stopped) return;
 
-        // 新版接口返回 { ok, sessions: [...] }，旧版可能是 conversations，做个兼容
         const rawList: any[] = data.sessions || data.conversations || [];
 
         const serverConvs: Conversation[] = rawList.map((c: any) => {
@@ -344,6 +288,82 @@ function InboxContent() {
     };
   }, [activeChannel, activeConversationId]);
 
+  // 加载 + 轮询 H5 / webchat 会话列表
+  useEffect(() => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+    let stopped = false;
+
+    const fetchH5Sessions = async () => {
+      try {
+        const resp = await fetch("/api/h5/sessions");
+        const data = await resp.json();
+        if (!data?.ok || !Array.isArray(data.sessions) || stopped) return;
+
+        const rawList: any[] = data.sessions;
+
+        const serverUnreads: Record<string, number> = {};
+        const base: Record<string, number> = {
+          ...h5UnreadBaseRef.current,
+        };
+
+        const convList: Conversation[] = rawList.map((s: any) => {
+          const id = s.id as string;
+          const rawUnread = Number(s.unreadCount || 0);
+          serverUnreads[id] = rawUnread;
+
+          if (!(id in base)) {
+            base[id] = rawUnread;
+          }
+
+          const vipGuest = s.vipGuest ?? null;
+          const lastMsgAt =
+            typeof s.lastMsgAt === "string"
+              ? new Date(s.lastMsgAt)
+              : new Date();
+
+          const baseUnread = base[id] || 0;
+          let effectiveUnread = Math.max(0, rawUnread - baseUnread);
+
+          if (activeChannel === "webchat" && id === activeConversationId) {
+            effectiveUnread = 0;
+          }
+
+          const conv: Conversation = {
+            id,
+            channel: "webchat",
+            displayName: s.displayName,
+            lastMessagePreview: s.lastMsgPreview || "",
+            unreadCount: effectiveUnread,
+            lastMessageAtLabel: "",
+            vip: false,
+            online: false,
+          };
+
+          (conv as any).vipGuest = vipGuest;
+          (conv as any).vipNumber = s.vipNumber;
+          (conv as any).lastMsgAt = lastMsgAt;
+
+          return conv;
+        });
+
+        h5ServerUnreadsRef.current = serverUnreads;
+        h5UnreadBaseRef.current = base;
+
+        setH5Conversations(convList);
+      } catch (e) {
+        console.error("load h5 sessions failed:", e);
+      }
+    };
+
+    fetchH5Sessions();
+    timer = setInterval(fetchH5Sessions, 5000);
+
+    return () => {
+      stopped = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [activeChannel, activeConversationId]);
+
   // 当前要展示的会话源：按照当前 channel 拆分（vipRequests 在这里不会进来）
   const visibleConversations = useMemo(() => {
     let base: Conversation[];
@@ -351,22 +371,38 @@ function InboxContent() {
     if (activeChannel === "wechat") {
       base = wecomConversations;
     } else if (activeChannel === "webchat") {
-      // ✅ webchat 用 H5 會話列表
       base = h5Conversations;
     } else {
       base = mockConvs.filter((c) => c.channel === activeChannel);
     }
 
     return [...base].sort((a, b) => {
-      const aMsgs = messagesState[a.id] || mockMessages[a.id] || [];
-      const bMsgs = messagesState[b.id] || mockMessages[b.id] || [];
-      const aTimestamp = getLastMessageTimestamp(aMsgs);
-      const bTimestamp = getLastMessageTimestamp(bMsgs);
+      const aMsgs =
+        messagesState[a.id] ||
+        (a.channel !== "wechat" && a.channel !== "webchat"
+          ? mockMessages[a.id] || []
+          : []);
+      const bMsgs =
+        messagesState[b.id] ||
+        (b.channel !== "wechat" && b.channel !== "webchat"
+          ? mockMessages[b.id] || []
+          : []);
+
+      let aTimestamp = getLastMessageTimestamp(aMsgs);
+      let bTimestamp = getLastMessageTimestamp(bMsgs);
+
+      if (!aTimestamp && (a as any).lastMsgAt) {
+        aTimestamp = new Date((a as any).lastMsgAt).getTime();
+      }
+      if (!bTimestamp && (b as any).lastMsgAt) {
+        bTimestamp = new Date((b as any).lastMsgAt).getTime();
+      }
+
       return bTimestamp - aTimestamp;
     });
   }, [activeChannel, wecomConversations, h5Conversations, mockConvs, messagesState]);
 
-  // 左侧栏未读数（包含 vipRequests）
+  // 左侧栏未读数（包含 vipRequests + webchat）
   const unreadCounts = useMemo(() => {
     const counts: Record<InboxChannel, number> = {
       wechat: 0,
@@ -379,6 +415,7 @@ function InboxContent() {
     };
 
     mockConvs.forEach((conv) => {
+      if (conv.channel === "webchat") return; // webchat 用實際會話
       counts[conv.channel] += conv.unreadCount;
     });
 
@@ -386,7 +423,6 @@ function InboxContent() {
       counts.wechat += conv.unreadCount;
     });
 
-    // ✅ 把 H5/webchat 的未讀數也算進來（目前都是 0，後面可以做真正未讀）
     h5Conversations.forEach((conv) => {
       counts.webchat += conv.unreadCount;
     });
@@ -394,9 +430,13 @@ function InboxContent() {
     return counts;
   }, [mockConvs, wecomConversations, h5Conversations, vipPendingCount]);
 
-  // 全部会话（用于搜索、activeConversation、选会话）
+  // 全部会话（用于搜索、activeConversation）
   const allConversations: Conversation[] = useMemo(
-    () => [...wecomConversations, ...h5Conversations, ...mockConvs],
+    () => [
+      ...wecomConversations,
+      ...h5Conversations,
+      ...mockConvs.filter((c) => c.channel !== "webchat"),
+    ],
     [wecomConversations, h5Conversations, mockConvs]
   );
 
@@ -414,7 +454,7 @@ function InboxContent() {
       return fromState;
     }
 
-    if (conv && conv.channel !== "wechat") {
+    if (conv && conv.channel !== "wechat" && conv.channel !== "webchat") {
       return mockMessages[activeConversationId] || [];
     }
 
@@ -436,7 +476,9 @@ function InboxContent() {
 
       const fromState = messagesState[conv.id] || [];
       const fromMock =
-        conv.channel === "wechat" ? [] : mockMessages[conv.id] || [];
+        conv.channel === "wechat" || conv.channel === "webchat"
+          ? []
+          : mockMessages[conv.id] || [];
       const msgs = fromState.length > 0 ? fromState : fromMock;
 
       const messagesMatch = msgs.some((m) =>
@@ -449,8 +491,16 @@ function InboxContent() {
     });
 
     return Object.values(byId).sort((a, b) => {
-      const msgsA = messagesState[a.id] || mockMessages[a.id] || [];
-      const msgsB = messagesState[b.id] || mockMessages[b.id] || [];
+      const msgsA =
+        messagesState[a.id] ||
+        (a.channel !== "wechat" && a.channel !== "webchat"
+          ? mockMessages[a.id] || []
+          : []);
+      const msgsB =
+        messagesState[b.id] ||
+        (b.channel !== "wechat" && b.channel !== "webchat"
+          ? mockMessages[b.id] || []
+          : []);
       const aTimestamp = getLastMessageTimestamp(msgsA);
       const bTimestamp = getLastMessageTimestamp(msgsB);
       return bTimestamp - aTimestamp;
@@ -458,13 +508,12 @@ function InboxContent() {
   }, [searchQuery, allConversations, messagesState]);
 
   // 选会话
-    // 选会话
   const handleConversationSelect = async (conversationId: string) => {
     setActiveConversationId(conversationId);
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // ✅ 微信渠道：從後端拉消息 + 清未讀 + 拉 VIP Profile（保持不變）
+    // 微信渠道：从后端拉消息 + 清未读 + 拉 VIP Profile
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
@@ -520,23 +569,56 @@ function InboxContent() {
       return;
     }
 
-    // ✅ H5 / webchat 渠道：從 Message 表拉消息 + 用同一個 VIP profile API
+    // H5 / webchat 渠道
     if (conv?.channel === "webchat") {
       try {
         const resp = await fetch(
           `/api/h5/sessions/${encodeURIComponent(
             conversationId
-          )}/messages?take=50`
+          )}/messages?take=100`
         );
         const data = await resp.json();
         if (data?.ok && Array.isArray(data.messages)) {
+          const mapped: Message[] = data.messages.map((m: any) => ({
+            id: m.id,
+            conversationId: m.conversationId || conversationId,
+            direction: m.direction === "out" ? "out" : "in",
+            text: m.text || "",
+            timeLabel:
+              m.timeLabel ||
+              new Date(
+                typeof m.timestamp === "number"
+                  ? m.timestamp
+                  : m.timestamp || Date.now()
+              ).toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+              }),
+            timestamp:
+              typeof m.timestamp === "number"
+                ? m.timestamp
+                : new Date(m.timestamp || Date.now()).getTime(),
+          }));
+
           setMessagesState((prev) => ({
             ...prev,
-            [conversationId]: data.messages,
+            [conversationId]: mapped,
           }));
         }
+
+        const serverUnreads = h5ServerUnreadsRef.current;
+        h5UnreadBaseRef.current = {
+          ...h5UnreadBaseRef.current,
+          [conversationId]: serverUnreads[conversationId] || 0,
+        };
+
+        setH5Conversations((prev) =>
+          prev.map((c) =>
+            c.id === conversationId ? { ...c, unreadCount: 0 } : c
+          )
+        );
       } catch (e) {
-        console.error("load h5/webchat messages failed:", e);
+        console.error("load h5 messages failed:", e);
       }
 
       try {
@@ -550,14 +632,14 @@ function InboxContent() {
           setActiveProfile(null);
         }
       } catch (e) {
-        console.error("load VIP profile (webchat) failed:", e);
+        console.error("load VIP profile (H5) failed:", e);
         setActiveProfile(null);
       }
 
       return;
     }
 
-    // 其它渠道（whatsapp / line / mock），保持你原來的 mock 行為
+    // 其它渠道（mock）
     setMockConvs((prevConversations) =>
       prevConversations.map((conv) =>
         conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
@@ -579,7 +661,6 @@ function InboxContent() {
 
     setActiveProfile(mockProfiles[conversationId] || null);
   };
-
 
   // 搜索结果点击
   const handleSearchResultSelect = (id: string) => {
@@ -631,10 +712,65 @@ function InboxContent() {
       }
     };
 
-    // 先拉一次
     fetchMessages();
+    const timer = setInterval(fetchMessages, 4000);
 
-    // 然后每 4 秒拉一次
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [activeChannel, activeConversationId, allConversations]);
+
+  // 轮询当前 webchat 会话的消息（H5）
+  useEffect(() => {
+    if (activeChannel !== "webchat") return;
+    if (!activeConversationId) return;
+
+    const conv = allConversations.find((c) => c.id === activeConversationId);
+    if (!conv || conv.channel !== "webchat") return;
+
+    const convId = activeConversationId;
+    let stopped = false;
+
+    const fetchMessages = async () => {
+      try {
+        const resp = await fetch(
+          `/api/h5/sessions/${encodeURIComponent(convId)}/messages?take=100`
+        );
+        const data = await resp.json();
+        if (!stopped && data?.ok && Array.isArray(data.messages)) {
+          const mapped: Message[] = data.messages.map((m: any) => ({
+            id: m.id,
+            conversationId: m.conversationId || convId,
+            direction: m.direction === "out" ? "out" : "in",
+            text: m.text || "",
+            timeLabel:
+              m.timeLabel ||
+              new Date(
+                typeof m.timestamp === "number"
+                  ? m.timestamp
+                  : m.timestamp || Date.now()
+              ).toLocaleTimeString("en-US", {
+                hour: "numeric",
+                minute: "2-digit",
+              }),
+            timestamp:
+              typeof m.timestamp === "number"
+                ? m.timestamp
+                : new Date(m.timestamp || Date.now()).getTime(),
+          }));
+
+          setMessagesState((prev) => ({
+            ...prev,
+            [convId]: mapped,
+          }));
+        }
+      } catch (e) {
+        console.error("poll h5 messages failed:", e);
+      }
+    };
+
+    fetchMessages();
     const timer = setInterval(fetchMessages, 4000);
 
     return () => {
@@ -644,14 +780,13 @@ function InboxContent() {
   }, [activeChannel, activeConversationId, allConversations]);
 
   // 发消息
-    // 发消息
   const handleSendMessage = async (text: string) => {
     if (!activeConversationId) return;
     const conversationId = activeConversationId;
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // ✅ 微信渠道：用企業微信發送（保持原邏輯）
+    // 微信渠道：不做乐观更新，直接发给后端，等轮询把真实消息拉回来
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
@@ -674,10 +809,10 @@ function InboxContent() {
       return;
     }
 
-    // ✅ webchat 渠道：寫入 H5 Message 表，讓 /vip-chat 也能看到
+    // H5 / webchat 渠道：走自己的 API，交給輪詢更新
     if (conv?.channel === "webchat") {
       try {
-        const resp = await fetch(
+        await fetch(
           `/api/h5/sessions/${encodeURIComponent(
             conversationId
           )}/messages`,
@@ -687,43 +822,23 @@ function InboxContent() {
             body: JSON.stringify({ text, from: "agent" }),
           }
         );
-        const data = await resp.json();
-
-        if (data?.ok && data.message) {
-          const m = data.message as any;
-
-          const newMessage: Message = {
-            id: m.id,
-            conversationId: m.conversationId,
-            direction: m.direction === "out" ? "out" : "in",
-            text: m.text || "",
-            timeLabel: m.timeLabel,
-            timestamp: m.timestamp,
-          };
-
-          setMessagesState((prev) => ({
-            ...prev,
-            [conversationId]: [...(prev[conversationId] || []), newMessage],
-          }));
-        }
       } catch (e) {
-        console.error("send webchat message failed:", e);
+        console.error("send h5 message failed:", e);
       }
       return;
     }
 
-    // 其它渠道（whatsapp / line / email / phone 仍用 mock）
-    const now = Date.now();
+    // 其它渠道（mock）
     const newMessage: Message = {
-      id: `m${now}`,
+      id: `m${Date.now()}`,
       conversationId,
       direction: "out",
       text,
-      timeLabel: new Date(now).toLocaleTimeString("en-US", {
+      timeLabel: new Date().toLocaleTimeString("en-US", {
         hour: "numeric",
         minute: "2-digit",
       }),
-      timestamp: now,
+      timestamp: Date.now(),
     };
 
     setMessagesState((prev) => ({
@@ -731,7 +846,6 @@ function InboxContent() {
       [conversationId]: [...(prev[conversationId] || []), newMessage],
     }));
   };
-
 
   const handleCloseConversation = () => {
     console.log("Close conversation");

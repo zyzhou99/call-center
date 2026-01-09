@@ -1,23 +1,14 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, FormEvent } from "react";
+import { useEffect, useRef, useState, FormEvent, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { ArrowLeft, Send } from "lucide-react";
 
 interface ChatMessage {
   id: string;
-  from: "vip" | "concierge";
+  from: "vip" | "concierge" | "system";
   text: string;
   createdAt: number;
-}
-
-interface ServerMessage {
-  id: string;
-  conversationId: string;
-  direction: "in" | "out";
-  text: string;
-  timeLabel?: string;
-  timestamp: number;
 }
 
 const CONCIERGE_NAME = "Joye Duan";
@@ -41,78 +32,51 @@ function formatDate(ts: number) {
 
 export default function VipChatPage() {
   const searchParams = useSearchParams();
-
-  const pendingId = searchParams.get("pendingId");
   const sessionId = searchParams.get("sessionId");
-
-  // 目前真正用的是 sessionId，pendingId 只是保留作備用
-  const chatKey = useMemo(() => {
-    if (pendingId) return `vip_chat_${pendingId}`;
-    if (sessionId) return `vip_chat_${sessionId}`;
-    return "vip_chat_demo";
-  }, [pendingId, sessionId]);
 
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
-  // 從後端拉取這個 session 的真實聊天記錄
+  // 從 H5 接口拉消息 + 輪詢
   useEffect(() => {
-    if (!sessionId) {
-      setError("Missing session id.");
-      setLoading(false);
-      return;
-    }
+    if (!sessionId) return;
 
-    let cancelled = false;
+    let stopped = false;
 
     const fetchMessages = async () => {
       try {
         const resp = await fetch(
-          `/api/h5/sessions/${encodeURIComponent(
-            sessionId
-          )}/messages?take=50`
+          `/api/h5/sessions/${encodeURIComponent(sessionId)}/messages?take=100`
         );
         const data = await resp.json();
 
-        if (cancelled) return;
+        if (!data?.ok || !Array.isArray(data.messages) || stopped) return;
 
-        if (!data?.ok) {
-          console.error("load vip-chat messages failed:", data?.error);
-          setError("Failed to load chat history.");
-          setLoading(false);
-          return;
-        }
-
-        const list: ServerMessage[] = Array.isArray(data.messages)
-          ? data.messages
-          : [];
-
-        const mapped: ChatMessage[] = list.map((m) => ({
+        const normalized: ChatMessage[] = data.messages.map((m: any) => ({
           id: m.id,
           from: m.direction === "out" ? "concierge" : "vip",
           text: m.text || "",
-          createdAt: m.timestamp,
+          createdAt:
+            typeof m.timestamp === "number"
+              ? m.timestamp
+              : new Date(m.timestamp || Date.now()).getTime(),
         }));
 
-        setMessages(mapped);
-        setLoading(false);
+        setMessages(normalized);
       } catch (e) {
-        if (cancelled) return;
-        console.error("Error fetching vip-chat messages:", e);
-        setError("Network error. Please try again.");
-        setLoading(false);
+        console.error("load h5 chat messages failed:", e);
       }
     };
 
     fetchMessages();
+    const timer = setInterval(fetchMessages, 4000);
 
     return () => {
-      cancelled = true;
+      stopped = true;
+      clearInterval(timer);
     };
   }, [sessionId]);
 
@@ -125,15 +89,12 @@ export default function VipChatPage() {
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
     const text = input.trim();
-    if (!text) return;
-    if (!sessionId) return;
+    if (!text || !sessionId) return;
 
     setInput("");
 
-    const now = Date.now();
-
     try {
-      const resp = await fetch(
+      await fetch(
         `/api/h5/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
           method: "POST",
@@ -141,41 +102,24 @@ export default function VipChatPage() {
           body: JSON.stringify({ text, from: "vip" }),
         }
       );
-      const data = await resp.json();
-
-      if (data?.ok && data.message) {
-        const m = data.message as ServerMessage;
-        const msg: ChatMessage = {
-          id: m.id,
-          from: m.direction === "out" ? "concierge" : "vip",
-          text: m.text || text,
-          createdAt: m.timestamp ?? now,
-        };
-        setMessages((prev) => [...prev, msg]);
-      } else {
-        // 後端失敗時，至少本地先顯示一條（PoC）
-        const msg: ChatMessage = {
-          id: `vip-${now}`,
-          from: "vip",
-          text,
-          createdAt: now,
-        };
-        setMessages((prev) => [...prev, msg]);
-      }
+      // 不做樂觀更新，交給輪詢去同步最新消息
     } catch (err) {
-      console.error("send vip-chat message failed:", err);
-      const msg: ChatMessage = {
-        id: `vip-${now}`,
-        from: "vip",
-        text,
-        createdAt: now,
-      };
-      setMessages((prev) => [...prev, msg]);
+      console.error("send h5 message failed:", err);
     }
   };
 
   // 用來在列表中插入日期分隔
   let lastDateLabel: string | null = null;
+
+  if (!sessionId) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white">
+        <div className="text-sm text-gray-500">
+          Missing session. Please go back and start the chat again.
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-white flex justify-center">
@@ -215,67 +159,53 @@ export default function VipChatPage() {
           ref={listRef}
           className="flex-1 overflow-y-auto px-4 py-4 space-y-4 bg-white"
         >
-          {loading && (
-            <div className="flex justify-center py-4 text-[13px] text-[#b8b0a3]">
-              Connecting to your concierge...
-            </div>
-          )}
+          {messages.map((m) => {
+            const isSelf = m.from === "vip";
+            const dateLabel = formatDate(m.createdAt);
+            const showDate =
+              !lastDateLabel || lastDateLabel !== dateLabel || undefined;
+            lastDateLabel = dateLabel;
 
-          {error && !loading && (
-            <div className="flex justify-center py-4 text-[13px] text-red-500">
-              {error}
-            </div>
-          )}
+            return (
+              <div key={m.id}>
+                {showDate && (
+                  <div className="flex justify-center mb-3">
+                    <span className="px-3 py-1 rounded-full bg-[#f9f8f6] text-[11px] text-[#b8b0a3]">
+                      {dateLabel}
+                    </span>
+                  </div>
+                )}
 
-          {!loading &&
-            !error &&
-            messages.map((m) => {
-              const isSelf = m.from === "vip";
-              const dateLabel = formatDate(m.createdAt);
-              const showDate =
-                !lastDateLabel || lastDateLabel !== dateLabel || undefined;
-              lastDateLabel = dateLabel;
-
-              return (
-                <div key={m.id}>
-                  {showDate && (
-                    <div className="flex justify-center mb-3">
-                      <span className="px-3 py-1 rounded-full bg-[#f9f8f6] text-[11px] text-[#b8b0a3]">
-                        {dateLabel}
-                      </span>
+                <div
+                  className={`flex ${
+                    isSelf ? "justify-end" : "justify-start"
+                  } mb-1`}
+                >
+                  <div className="max-w-[80%]">
+                    {/* 時間 */}
+                    <div
+                      className={`mb-1 text-[11px] text-[#b8b0a3] ${
+                        isSelf ? "text-right" : "text-left"
+                      }`}
+                    >
+                      {formatTime(m.createdAt)}
                     </div>
-                  )}
 
-                  <div
-                    className={`flex ${
-                      isSelf ? "justify-end" : "justify-start"
-                    } mb-1`}
-                  >
-                    <div className="max-w-[80%]">
-                      {/* 時間 */}
-                      <div
-                        className={`mb-1 text-[11px] text-[#b8b0a3] ${
-                          isSelf ? "text-right" : "text-left"
-                        }`}
-                      >
-                        {formatTime(m.createdAt)}
-                      </div>
-
-                      {/* 氣泡 */}
-                      <div
-                        className={`rounded-3xl px-4 py-3 text-[15px] leading-relaxed ${
-                          isSelf
-                            ? "bg-[#F5E0B6] text-[#3a3023]"
-                            : "bg-[#F9F8F6] text-[#3a3023]"
-                        }`}
-                      >
-                        {m.text}
-                      </div>
+                    {/* 氣泡 */}
+                    <div
+                      className={`rounded-3xl px-4 py-3 text-[15px] leading-relaxed ${
+                        isSelf
+                          ? "bg-[#F5E0B6] text-[#3a3023]"
+                          : "bg-[#F9F8F6] text-[#3a3023]"
+                      }`}
+                    >
+                      {m.text}
                     </div>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            );
+          })}
         </div>
 
         {/* 輸入區 */}
@@ -295,7 +225,7 @@ export default function VipChatPage() {
           </div>
           <button
             type="submit"
-            disabled={!input.trim() || !sessionId}
+            disabled={!input.trim()}
             className="w-11 h-11 rounded-2xl flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ backgroundColor: "#F5E0B6" }}
           >

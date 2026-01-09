@@ -91,7 +91,9 @@ export async function POST(req: Request, { params }: RouteParams) {
       );
     }
 
-    const from = body.from || "vip"; // 默認當作 VIP 發的
+    const from: "vip" | "agent" | "system" =
+      body.from === "agent" || body.from === "system" ? body.from : "vip";
+
     const session = await prisma.session.findUnique({
       where: { id: sessionId },
     });
@@ -123,14 +125,16 @@ export async function POST(req: Request, { params }: RouteParams) {
       },
     });
 
-    // 更新 Session 的最後消息 & 未讀數
+    const currentUnread = session.unreadCount ?? 0;
+    const nextUnread =
+      from === "vip" ? currentUnread + 1 : currentUnread; // 只有 VIP 發才算未讀
+
     await prisma.session.update({
       where: { id: sessionId },
       data: {
         lastMsgAt: now,
         lastMsgPreview: rawText,
-        // 未來如果要做真正的已讀邏輯可以再細分，這裡簡單 +1
-        unreadCount: session.unreadCount + 1,
+        unreadCount: nextUnread,
       },
     });
 
