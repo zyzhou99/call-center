@@ -8,8 +8,12 @@ interface RouteParams {
   params: { id: string };
 }
 
-// 随便定义一个 H5 用的 openKfId，主要用来跟 externalUserId 组成唯一键
+// H5 用的 openKfId，占位：只用來和 externalUserId 做唯一鍵
 const H5_OPENKFID = "H5_WEBCHAT_DEMO";
+
+// WeCom / hybrid + 微信 掃碼後，審批通過要跳轉的企業微信客服鏈接（寫死）
+const WECOM_FIXED_KF_URL =
+  "https://work.weixin.qq.com/kfid/kfcc8d4feb1548d37de";
 
 function buildWelcomeText(opts: {
   preferredName?: string | null;
@@ -216,25 +220,22 @@ export async function POST(req: Request, { params }: RouteParams) {
 
     // --------- 情況二：APPROVED，要為 H5 / WeCom 做不同處理 ---------
 
+    // 先沿用 DB 裡已有的值（理論上大多數情況都是 null）
     let sessionIdToUse: string | null = existing.sessionId ?? null;
-    // 🆕 新增：為了寫回企業微信跳轉鏈接
     let kfUrlToUse: string | null = existing.kfUrl ?? null;
 
-    // 目前我們只為 H5 入口（entryMode === 'h5'）創建 Session；
-    // WeCom 入口的會話是通過企業微信同步那條鏈路建的。
+    // ✅ H5 入口（mode=h5 或 hybrid 但 entryMode 被判定為 h5）：
+    // 為 H5/webchat 建 Session + 歡迎語
     if (existing.entryMode === "h5") {
-      // 1) 準備 openKfId / externalUserId / channel
       const openKfid = H5_OPENKFID;
 
-      // 優先用 inputChannelIdentifier（browserId），沒有就退回 vipNumber
+      // 優先用 inputChannelIdentifier（browserId / openid），沒有就退回 vipNumber
       const identifierSource =
         existing.inputChannelIdentifier?.trim() || existing.vipNumber;
       const externalUserId = `h5:${identifierSource}`;
 
-      // 這個必須跟 Inbox 裡 webchat channel 的名字一致
       const channel = "webchat";
 
-      // 顯示用的名字
       const displayName =
         existing.inputPreferredName ||
         existing.vipGuest?.preferredName ||
@@ -247,7 +248,7 @@ export async function POST(req: Request, { params }: RouteParams) {
         vipNumber: existing.vipNumber,
       });
 
-      // 2) upsert 一條 Session（保證同一個 browserId 多次掃碼命中同一條）
+      // upsert Session（同一個 browserId/openid 多次掃碼命中同一會話）
       const session = await prisma.session.upsert({
         where: {
           openKfid_externalUserId: {
@@ -277,7 +278,7 @@ export async function POST(req: Request, { params }: RouteParams) {
 
       sessionIdToUse = session.id;
 
-      // 3) 在 Message 裡插入一條系統歡迎語
+      // 寫一條系統歡迎語到 Message
       await prisma.message.create({
         data: {
           msgId: `vip-welcome-${session.id}-${now.getTime()}`,
@@ -298,23 +299,11 @@ export async function POST(req: Request, { params }: RouteParams) {
         },
       });
     }
-    // 🆕 新增：WeCom 混合場景（entryMode === 'wecom'，一般就是微信掃碼 + hybrid）
-    else if (existing.entryMode === "wecom") {
-      // 這裡用你之前企業微信客服的 URL 配置
-      // 如果你原來用的是其他 env 名字，把這兩行改成你原來的就行
-      const envKfUrl =
-        process.env.NEXT_PUBLIC_WECOM_KF_URL || process.env.WECOM_KF_URL || "";
 
-      if (!envKfUrl) {
-        console.error(
-          "[vip/approvals] WECOM_KF_URL not configured in env vars; pendingApproval.id=",
-          existing.id
-        );
-        // 沒配置我們就不強行設置，前端會一直停在 Connecting，
-        // 你只需要補上 env，重新 deploy 即可。
-      } else {
-        kfUrlToUse = envKfUrl;
-      }
+    // ✅ WeCom / hybrid + 微信 掃碼的入口（entryMode === "wecom"）：
+    // 審批通過後，直接設置企業微信客服鏈接，讓 /vip-pending 跳過去。
+    if (existing.entryMode === "wecom") {
+      kfUrlToUse = WECOM_FIXED_KF_URL;
     }
 
     // 4) 回填 PendingApproval 的狀態 & sessionId / kfUrl

@@ -11,7 +11,7 @@ interface SubmitBody {
   version?: string;
   entryMode?: string;
   scanChannel?: string;
-  channelIdentifier?: string; // ⭐ 前端傳來的 browserId / openid / phone 等
+  channelIdentifier?: string; // browserId / openid / phone 等
 }
 
 /**
@@ -37,22 +37,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // ⭐ 解析 channelIdentifier（可能是 browserId / openid / phone 等）
+    // 解析 channelIdentifier（可能是 browserId / openid / phone 等）
     const channelIdentifierRaw = body.channelIdentifier;
     const channelIdentifier =
       typeof channelIdentifierRaw === "string" && channelIdentifierRaw.trim()
         ? channelIdentifierRaw.trim()
         : null;
-
-    // ⭐ 規範 version / entryMode / scanChannel 的值
-    const version: "hybrid" | "h5" =
-      body.version === "h5" ? "h5" : "hybrid";
-
-    const entryMode: "h5" | "wecom" =
-      body.entryMode === "wecom" ? "wecom" : "h5";
-
-    const scanChannel: "wechat" | "browser" =
-      body.scanChannel === "wechat" ? "wechat" : "browser";
 
     // 1) 只用 VIP 号做硬校验
     const vip = await prisma.vipGuest.findUnique({
@@ -87,20 +77,59 @@ export async function POST(req: Request) {
         "VIP number matched. Birthday is not recorded in the system; please verify with the guest.";
     }
 
-    // 3) 创建 PendingApproval（永远只要 VIP 号对，就能发 request）
+    // 3) 算出 version / scanChannel / entryMode（統一一下）
+    const rawVersion = body.version ?? null;
+    const rawEntryMode = body.entryMode ?? null;
+    const rawScanChannel = body.scanChannel ?? null;
+
+    const version: "h5" | "hybrid" =
+      rawVersion === "hybrid" || rawVersion === "h5" ? rawVersion : "h5";
+
+    const scanChannel: "wechat" | "browser" =
+      rawScanChannel === "wechat" || rawScanChannel === "browser"
+        ? rawScanChannel
+        : "browser";
+
+    let entryMode: "wecom" | "h5";
+    if (rawEntryMode === "wecom" || rawEntryMode === "h5") {
+      entryMode = rawEntryMode;
+    } else if (version === "hybrid" && scanChannel === "wechat") {
+      // hybrid + 微信掃碼 → 默認認為是 WeCom 入口
+      entryMode = "wecom";
+    } else {
+      entryMode = "h5";
+    }
+
+    // 4) WeCom 入口：這裡就直接決定 kfUrl
+    let kfUrl: string | null = null;
+    if (entryMode === "wecom") {
+      const envKf =
+        process.env.NEXT_PUBLIC_WECOM_KF_URL || process.env.WECOM_KF_URL || null;
+      if (!envKf) {
+        console.warn(
+          "[/api/vip/submit] WeCom entry but WECOM_KF_URL not configured; will create pendingApproval without kfUrl"
+        );
+      } else {
+        kfUrl = envKf;
+      }
+    }
+
+    // 5) 创建 PendingApproval（只要 VIP 号對，就能發 request）
     const approval = await prisma.pendingApproval.create({
       data: {
         vipNumber: vip.vipNumber,
         vipGuestId: vip.id,
         inputPreferredName: body.preferredName?.trim() || null,
         inputBirthdayMd: inputBirthday,
-        // ⭐ 把渠道唯一 ID 寫進去（H5 = browserId，微信可以是 openid）
+        // 渠道唯一 ID（H5 = browserId，微信之後會換成 openid）
         inputChannelIdentifier: channelIdentifier ?? undefined,
 
-        // ⭐ 這裡使用剛剛規範好的 version / entryMode / scanChannel
         version,
         entryMode,
         scanChannel,
+
+        // WeCom 入口時，提前寫好企業微信跳轉鏈接
+        kfUrl: kfUrl ?? undefined,
       },
     });
 
