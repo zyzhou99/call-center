@@ -11,7 +11,7 @@ interface SubmitBody {
   version?: string;
   entryMode?: string;
   scanChannel?: string;
-  channelIdentifier?: string; // ⭐ 新增：前端傳來的 browserId / openid / phone 等
+  channelIdentifier?: string; // ⭐ 前端傳來的 browserId / openid / phone 等
 }
 
 /**
@@ -43,6 +43,16 @@ export async function POST(req: Request) {
       typeof channelIdentifierRaw === "string" && channelIdentifierRaw.trim()
         ? channelIdentifierRaw.trim()
         : null;
+
+    // ⭐ 規範 version / entryMode / scanChannel 的值
+    const version: "hybrid" | "h5" =
+      body.version === "h5" ? "h5" : "hybrid";
+
+    const entryMode: "h5" | "wecom" =
+      body.entryMode === "wecom" ? "wecom" : "h5";
+
+    const scanChannel: "wechat" | "browser" =
+      body.scanChannel === "wechat" ? "wechat" : "browser";
 
     // 1) 只用 VIP 号做硬校验
     const vip = await prisma.vipGuest.findUnique({
@@ -87,10 +97,10 @@ export async function POST(req: Request) {
         // ⭐ 把渠道唯一 ID 寫進去（H5 = browserId，微信可以是 openid）
         inputChannelIdentifier: channelIdentifier ?? undefined,
 
-        // 这三个先用默认值，后面你有多入口/多二维码再细分
-        version: body.version ?? "h5-poc",
-        entryMode: body.entryMode ?? "h5",
-        scanChannel: body.scanChannel ?? "browser",
+        // ⭐ 這裡使用剛剛規範好的 version / entryMode / scanChannel
+        version,
+        entryMode,
+        scanChannel,
       },
     });
 

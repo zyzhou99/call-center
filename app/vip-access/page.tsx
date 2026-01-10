@@ -121,10 +121,10 @@ export default function VipAccessPage() {
   const [scanChannel, setScanChannel] = useState<ScanChannel>("browser");
   const [channelIdentifier, setChannelIdentifier] = useState<string | null>(null);
 
-
-  // 從 URL 讀 version，預設 hybrid
+  // ✅ 從 URL 讀 version / mode，預設 hybrid
+  // 優先用 ?version=，沒有就用 ?mode=
   const version: VersionType = useMemo(() => {
-    const v = searchParams.get("version");
+    const v = searchParams.get("version") || searchParams.get("mode");
     if (v === "h5") return "h5";
     return "hybrid";
   }, [searchParams]);
@@ -137,8 +137,11 @@ export default function VipAccessPage() {
     const ua = navigator.userAgent || "";
     const isWeChat = /MicroMessenger/i.test(ua);
 
+    // 只要是在微信裡打開，就標記 scanChannel = "wechat"
     setScanChannel(isWeChat ? "wechat" : "browser");
 
+    // version = "hybrid" + 微信 → 走企業微信客服（wecom）
+    // 其他情況 → 走 H5
     if (version === "hybrid" && isWeChat) {
       setEntryMode("wecom");
     } else {
@@ -213,7 +216,6 @@ export default function VipAccessPage() {
       case "MISSING_VIP_NUMBER":
         return t.errorMissingFields;
       case "VIP_NOT_FOUND":
-        // VIP 號根本不存在：用「卡號 / 生日與系統不符」這個文案就好
         return t.errorInfoMismatch;
       case "SERVER_ERROR":
         return t.errorServer;

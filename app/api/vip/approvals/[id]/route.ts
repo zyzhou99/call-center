@@ -214,9 +214,11 @@ export async function POST(req: Request, { params }: RouteParams) {
       );
     }
 
-    // --------- 情況二：APPROVED，要為 H5 建會話 + 歡迎語 ---------
+    // --------- 情況二：APPROVED，要為 H5 / WeCom 做不同處理 ---------
 
     let sessionIdToUse: string | null = existing.sessionId ?? null;
+    // 🆕 新增：為了寫回企業微信跳轉鏈接
+    let kfUrlToUse: string | null = existing.kfUrl ?? null;
 
     // 目前我們只為 H5 入口（entryMode === 'h5'）創建 Session；
     // WeCom 入口的會話是通過企業微信同步那條鏈路建的。
@@ -296,8 +298,26 @@ export async function POST(req: Request, { params }: RouteParams) {
         },
       });
     }
+    // 🆕 新增：WeCom 混合場景（entryMode === 'wecom'，一般就是微信掃碼 + hybrid）
+    else if (existing.entryMode === "wecom") {
+      // 這裡用你之前企業微信客服的 URL 配置
+      // 如果你原來用的是其他 env 名字，把這兩行改成你原來的就行
+      const envKfUrl =
+        process.env.NEXT_PUBLIC_WECOM_KF_URL || process.env.WECOM_KF_URL || "";
 
-    // 4) 回填 PendingApproval 的狀態 & sessionId
+      if (!envKfUrl) {
+        console.error(
+          "[vip/approvals] WECOM_KF_URL not configured in env vars; pendingApproval.id=",
+          existing.id
+        );
+        // 沒配置我們就不強行設置，前端會一直停在 Connecting，
+        // 你只需要補上 env，重新 deploy 即可。
+      } else {
+        kfUrlToUse = envKfUrl;
+      }
+    }
+
+    // 4) 回填 PendingApproval 的狀態 & sessionId / kfUrl
     const updated = await prisma.pendingApproval.update({
       where: { id },
       data: {
@@ -306,6 +326,7 @@ export async function POST(req: Request, { params }: RouteParams) {
         assignedAgentId: agentId ?? "demo-agent",
         assignedAt: now,
         sessionId: sessionIdToUse,
+        kfUrl: kfUrlToUse,
       },
       include: {
         vipGuest: {

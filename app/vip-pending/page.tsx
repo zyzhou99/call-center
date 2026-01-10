@@ -58,109 +58,118 @@ export default function VipPendingPage() {
   }
 
   useEffect(() => {
-  // 1) URL 裡壓根沒有 pendingId：直接當錯誤處理
-  if (!pendingId) {
-    setStatus("MISSING");
-    setMessage(
-      "Missing request id. Please go back and submit your information again."
-    );
-    clearPendingLocalState();
-    return;
-  }
-
-  let stopped = false;
-
-  async function checkOnce() {
-    try {
-      const res = await fetch(
-        `/api/vip/approvals/${encodeURIComponent(pendingId!)}`
+    // 1) URL 裡壓根沒有 pendingId：直接當錯誤處理
+    if (!pendingId) {
+      setStatus("MISSING");
+      setMessage(
+        "Missing request id. Please go back and submit your information again."
       );
-      const data: ApprovalResponse = await res.json();
-
-      if (stopped) return;
-
-      if (!data.ok || !data.approval) {
-        setStatus("ERROR");
-        setMessage(
-          "We could not find this request. It may have expired. Please submit your information again."
-        );
-        clearPendingLocalState();
-        return;
-      }
-
-      const approval = data.approval;
-      const s = approval.status;
-
-      if (s === "PENDING") {
-        setStatus("PENDING");
-        setMessage(
-          "Our concierge is reviewing your information. This usually takes just a moment."
-        );
-        setReason(null);
-        return;
-      }
-
-      if (s === "APPROVED") {
-        clearPendingLocalState();
-        setStatus("APPROVED");
-        setMessage("Your identity has been verified. Connecting you now...");
-
-        if (approval.kfUrl) {
-          window.location.href = approval.kfUrl;
-          return;
-        }
-
-        if (approval.sessionId) {
-          window.location.href = `/vip-chat?sessionId=${encodeURIComponent(
-            approval.sessionId
-          )}`;
-          return;
-        }
-        return;
-      }
-
-      if (s === "REJECTED") {
-        clearPendingLocalState();
-        setStatus("REJECTED");
-        setMessage(
-          "We are unable to complete your request via this channel."
-        );
-        setReason(approval.reason || null);
-        return;
-      }
-
-      if (s === "EXPIRED") {
-        clearPendingLocalState();
-        setStatus("EXPIRED");
-        setMessage(
-          "This request has expired. Please submit your information again."
-        );
-        setReason(null);
-        return;
-      }
-
-      setStatus("ERROR");
-      setMessage("Unexpected status. Please try again.");
       clearPendingLocalState();
-    } catch (e) {
-      if (stopped) return;
-      console.error("Error fetching approval:", e);
-      setStatus("ERROR");
-      setMessage("Network error. Please try again.");
+      return;
     }
-  }
 
-  // 先查一次
-  checkOnce();
-  // 然後每 3 秒輪詢一次狀態
-  const timer = setInterval(checkOnce, POLL_INTERVAL_MS);
+    let stopped = false;
 
-  return () => {
-    stopped = true;
-    clearInterval(timer);
-  };
-}, [pendingId]);
+    async function checkOnce() {
+      try {
+        const res = await fetch(
+          `/api/vip/approvals/${encodeURIComponent(pendingId!)}`
+        );
+        const data: ApprovalResponse = await res.json();
 
+        if (stopped) return;
+
+        if (!data.ok || !data.approval) {
+          setStatus("ERROR");
+          setMessage(
+            "We could not find this request. It may have expired. Please submit your information again."
+          );
+          clearPendingLocalState();
+          return;
+        }
+
+        const approval = data.approval;
+        const s = approval.status;
+
+        if (s === "PENDING") {
+          setStatus("PENDING");
+          setMessage(
+            "Our concierge is reviewing your information. This usually takes just a moment."
+          );
+          setReason(null);
+          return;
+        }
+
+        if (s === "APPROVED") {
+          clearPendingLocalState();
+          setStatus("APPROVED");
+          setMessage("Your identity has been verified. Connecting you now...");
+
+          // ✅ CASE 1：企業微信客服鏈路（WeCom hybrid）
+          if (approval.kfUrl) {
+            window.location.href = approval.kfUrl;
+            return;
+          }
+
+          // ✅ CASE 2：H5 webchat 鏈路（/vip-chat）
+          if (approval.sessionId) {
+            // 這裡用 window.location.href/replace 都可以，H5 我們直接用 href
+            window.location.href = `/vip-chat?sessionId=${encodeURIComponent(
+              approval.sessionId
+            )}`;
+            return;
+          }
+
+          // APPROVED 但後端沒給 kfUrl / sessionId，當成錯誤處理
+          setStatus("ERROR");
+          setMessage(
+            "Your request was approved, but we could not connect you automatically. Please submit again."
+          );
+          return;
+        }
+
+        if (s === "REJECTED") {
+          clearPendingLocalState();
+          setStatus("REJECTED");
+          setMessage(
+            "We are unable to complete your request via this channel."
+          );
+          setReason(approval.reason || null);
+          return;
+        }
+
+        if (s === "EXPIRED") {
+          clearPendingLocalState();
+          setStatus("EXPIRED");
+          setMessage(
+            "This request has expired. Please submit your information again."
+          );
+          setReason(null);
+          return;
+        }
+
+        // 兜底：出現未知狀態
+        setStatus("ERROR");
+        setMessage("Unexpected status. Please try again.");
+        clearPendingLocalState();
+      } catch (e) {
+        if (stopped) return;
+        console.error("Error fetching approval:", e);
+        setStatus("ERROR");
+        setMessage("Network error. Please try again.");
+      }
+    }
+
+    // 先查一次
+    checkOnce();
+    // 然後每 3 秒輪詢一次狀態
+    const timer = setInterval(checkOnce, POLL_INTERVAL_MS);
+
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [pendingId]);
 
   const isErrorLike =
     status === "MISSING" ||
@@ -201,7 +210,9 @@ export default function VipPendingPage() {
             {/* 圓形 spinner / 狀態標誌 */}
             <div
               className={`w-16 h-16 mb-4 rounded-full border-2 ${
-                isErrorLike ? "border-[#d3a65b]" : "border-[#d3a65b] border-t-transparent animate-spin"
+                isErrorLike
+                  ? "border-[#d3a65b]"
+                  : "border-[#d3a65b] border-t-transparent animate-spin"
               }`}
             />
 
