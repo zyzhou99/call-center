@@ -107,13 +107,16 @@ export default function VipPendingPage() {
 
           // ✅ CASE 1：企業微信客服鏈路（WeCom hybrid）
           if (approval.kfUrl) {
+            // ⭐ 這行是新加的：避免輪詢時不停重複跳轉
+            stopped = true;
             window.location.href = approval.kfUrl;
             return;
           }
 
           // ✅ CASE 2：H5 webchat 鏈路（/vip-chat）
           if (approval.sessionId) {
-            // 這裡用 window.location.href/replace 都可以，H5 我們直接用 href
+            // ⭐ 同理，先把 stopped 設為 true
+            stopped = true;
             window.location.href = `/vip-chat?sessionId=${encodeURIComponent(
               approval.sessionId
             )}`;

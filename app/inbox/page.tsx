@@ -31,6 +31,7 @@ interface VipRequestsResponse {
   error?: string;
 }
 
+// ⚠️ 和後端、approvals route 裡保持一致
 const OPEN_KFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
 const ADMIN = "sync123";
 const CHANNEL_STORAGE_KEY = "cc_active_channel";
@@ -56,12 +57,12 @@ function InboxContent() {
   // mock 会话（非微信、非 webchat 实会话）
   const [mockConvs, setMockConvs] = useState<Conversation[]>(mockConversations);
 
-  // 真实 wechat 会话
+  // 真实 wechat 会话（包括真 WeCom + H5 via WeChat）
   const [wecomConversations, setWecomConversations] = useState<Conversation[]>(
     []
   );
 
-  // 真实 H5 / webchat 会话
+  // 真实 H5 / webchat 会话（瀏覽器掃碼的 H5）
   const [h5Conversations, setH5Conversations] = useState<Conversation[]>([]);
 
   // 所有 channel 的消息（wechat + webchat + mock）
@@ -188,7 +189,7 @@ function InboxContent() {
     };
   }, []);
 
-  // 加载 + 轮询 WeCom 会话列表
+  // 加载 + 轮询 WeCom 会话列表（包含真 WeCom + H5 via WeChat）
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -288,7 +289,7 @@ function InboxContent() {
     };
   }, [activeChannel, activeConversationId]);
 
-  // 加载 + 轮询 H5 / webchat 会话列表
+  // 加载 + 轮询 H5 / webchat 会话列表（瀏覽器 H5）
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -520,37 +521,96 @@ function InboxContent() {
         (conv as any).external_userid ||
         conv.id;
 
-      try {
-        const resp = await fetch(
-          `/api/wecom/sessions/${encodeURIComponent(
-            externalUserId
-          )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
-          { headers: { "x-admin-token": ADMIN } }
-        );
-        const data = await resp.json();
+      const isH5WeChat =
+        typeof externalUserId === "string" &&
+        externalUserId.startsWith("h5:");
 
-        if (data?.ok && Array.isArray(data.messages)) {
-          setMessagesState((prev) => ({
-            ...prev,
-            [conversationId]: data.messages,
-          }));
+      if (isH5WeChat) {
+        // ⭐ H5 via WeChat：用 H5 API 拉消息
+        try {
+          const resp = await fetch(
+            `/api/h5/sessions/${encodeURIComponent(
+              conversationId
+            )}/messages?take=100`
+          );
+          const data = await resp.json();
+          if (data?.ok && Array.isArray(data.messages)) {
+            const mapped: Message[] = data.messages.map((m: any) => ({
+              id: m.id,
+              conversationId: m.conversationId || conversationId,
+              direction: m.direction === "out" ? "out" : "in",
+              text: m.text || "",
+              timeLabel:
+                m.timeLabel ||
+                new Date(
+                  typeof m.timestamp === "number"
+                    ? m.timestamp
+                    : m.timestamp || Date.now()
+                ).toLocaleTimeString("en-US", {
+                  hour: "numeric",
+                  minute: "2-digit",
+                }),
+              timestamp:
+                typeof m.timestamp === "number"
+                  ? m.timestamp
+                  : new Date(m.timestamp || Date.now()).getTime(),
+            }));
+
+            setMessagesState((prev) => ({
+              ...prev,
+              [conversationId]: mapped,
+            }));
+          }
+
+          const serverUnreads = wecomServerUnreadsRef.current;
+          wecomUnreadBaseRef.current = {
+            ...wecomUnreadBaseRef.current,
+            [conversationId]: serverUnreads[conversationId] || 0,
+          };
+
+          setWecomConversations((prev) =>
+            prev.map((c) =>
+              c.id === conversationId ? { ...c, unreadCount: 0 } : c
+            )
+          );
+        } catch (e) {
+          console.error("load h5 (wechat) messages failed:", e);
         }
+      } else {
+        // ⭐ 真正企業微信客服會話：走 wecom API
+        try {
+          const resp = await fetch(
+            `/api/wecom/sessions/${encodeURIComponent(
+              externalUserId
+            )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
+            { headers: { "x-admin-token": ADMIN } }
+          );
+          const data = await resp.json();
 
-        const serverUnreads = wecomServerUnreadsRef.current;
-        wecomUnreadBaseRef.current = {
-          ...wecomUnreadBaseRef.current,
-          [conversationId]: serverUnreads[conversationId] || 0,
-        };
+          if (data?.ok && Array.isArray(data.messages)) {
+            setMessagesState((prev) => ({
+              ...prev,
+              [conversationId]: data.messages,
+            }));
+          }
 
-        setWecomConversations((prev) =>
-          prev.map((c) =>
-            c.id === conversationId ? { ...c, unreadCount: 0 } : c
-          )
-        );
-      } catch (e) {
-        console.error("load wecom messages failed:", e);
+          const serverUnreads = wecomServerUnreadsRef.current;
+          wecomUnreadBaseRef.current = {
+            ...wecomUnreadBaseRef.current,
+            [conversationId]: serverUnreads[conversationId] || 0,
+          };
+
+          setWecomConversations((prev) =>
+            prev.map((c) =>
+              c.id === conversationId ? { ...c, unreadCount: 0 } : c
+            )
+          );
+        } catch (e) {
+          console.error("load wecom messages failed:", e);
+        }
       }
 
+      // 無論哪一種 wechat 會話，都嘗試拉 VIP Profile
       try {
         const resp = await fetch(
           `/api/vip/profile/${encodeURIComponent(conversationId)}`
@@ -690,25 +750,70 @@ function InboxContent() {
       (conv as any).external_userid ||
       conv.id;
 
+    const isH5WeChat =
+      typeof externalUserId === "string" &&
+      externalUserId.startsWith("h5:");
+
     let stopped = false;
 
     const fetchMessages = async () => {
       try {
-        const resp = await fetch(
-          `/api/wecom/sessions/${encodeURIComponent(
-            externalUserId
-          )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
-          { headers: { "x-admin-token": ADMIN } }
-        );
-        const data = await resp.json();
-        if (!stopped && data?.ok && Array.isArray(data.messages)) {
-          setMessagesState((prev) => ({
-            ...prev,
-            [convId]: data.messages,
-          }));
+        if (isH5WeChat) {
+          // ⭐ H5 via WeChat：走 H5 API
+          const resp = await fetch(
+            `/api/h5/sessions/${encodeURIComponent(convId)}/messages?take=100`
+          );
+          const data = await resp.json();
+          if (!stopped && data?.ok && Array.isArray(data.messages)) {
+            const mapped: Message[] = data.messages.map((m: any) => ({
+              id: m.id,
+              conversationId: m.conversationId || convId,
+              direction: m.direction === "out" ? "out" : "in",
+              text: m.text || "",
+              timeLabel:
+                m.timeLabel ||
+                new Date(
+                  typeof m.timestamp === "number"
+                    ? m.timestamp
+                    : m.timestamp || Date.now()
+                ).toLocaleTimeString("en-US", {
+                  hour: "numeric",
+                  minute: "2-digit",
+                }),
+              timestamp:
+                typeof m.timestamp === "number"
+                  ? m.timestamp
+                  : new Date(m.timestamp || Date.now()).getTime(),
+            }));
+
+            setMessagesState((prev) => ({
+              ...prev,
+              [convId]: mapped,
+            }));
+          }
+        } else {
+          // ⭐ 真 WeCom 會話：走 wecom API
+          const resp = await fetch(
+            `/api/wecom/sessions/${encodeURIComponent(
+              externalUserId
+            )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
+            { headers: { "x-admin-token": ADMIN } }
+          );
+          const data = await resp.json();
+          if (!stopped && data?.ok && Array.isArray(data.messages)) {
+            setMessagesState((prev) => ({
+              ...prev,
+              [convId]: data.messages,
+            }));
+          }
         }
       } catch (e) {
-        console.error("poll wecom messages failed:", e);
+        console.error(
+          isH5WeChat
+            ? "poll h5 (wechat) messages failed:"
+            : "poll wecom messages failed:",
+          e
+        );
       }
     };
 
@@ -721,7 +826,7 @@ function InboxContent() {
     };
   }, [activeChannel, activeConversationId, allConversations]);
 
-  // 轮询当前 webchat 会话的消息（H5）
+  // 轮询当前 webchat 会话的消息（H5 浏览器）
   useEffect(() => {
     if (activeChannel !== "webchat") return;
     if (!activeConversationId) return;
@@ -786,26 +891,51 @@ function InboxContent() {
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // 微信渠道：不做乐观更新，直接发给后端，等轮询把真实消息拉回来
+    // 微信渠道：分 H5 via WeChat & 真 WeCom 兩種
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
         (conv as any).external_userid ||
         conv.id;
 
-      try {
-        await fetch("/api/wecom/kf/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            open_kfid: OPEN_KFID,
-            touser: externalUserId,
-            content: text,
-          }),
-        });
-      } catch (e) {
-        console.error("send wecom message failed:", e);
+      const isH5WeChat =
+        typeof externalUserId === "string" &&
+        externalUserId.startsWith("h5:");
+
+      if (isH5WeChat) {
+        // ⭐ H5 via WeChat：走 H5 發送，讓 /vip-chat 也能看到
+        try {
+          await fetch(
+            `/api/h5/sessions/${encodeURIComponent(
+              conversationId
+            )}/messages`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ text, from: "agent" }),
+            }
+          );
+        } catch (e) {
+          console.error("send h5 (wechat) message failed:", e);
+        }
+      } else {
+        // ⭐ 真 WeCom：走企業微信客服發送
+        try {
+          await fetch("/api/wecom/kf/send", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              open_kfid: OPEN_KFID,
+              touser: externalUserId,
+              content: text,
+            }),
+          });
+        } catch (e) {
+          console.error("send wecom message failed:", e);
+        }
       }
+
+      // wechat 模式下不做樂觀更新，等輪詢把真實消息拉回來
       return;
     }
 

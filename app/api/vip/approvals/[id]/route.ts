@@ -8,12 +8,17 @@ interface RouteParams {
   params: { id: string };
 }
 
-// H5 用的 openKfId，占位：只用來和 externalUserId 做唯一鍵
+// H5 用的 openKfId，占位：只用來和 externalUserId 做唯一鍵（瀏覽器掃碼的 H5）
 const H5_OPENKFID = "H5_WEBCHAT_DEMO";
 
 // WeCom / hybrid + 微信 掃碼後，審批通過要跳轉的企業微信客服鏈接（寫死）
 const WECOM_FIXED_KF_URL =
   "https://work.weixin.qq.com/kfid/kfcc8d4feb1548d37de";
+
+// ⚠️ 這個要和前端 inbox 裡的 OPEN_KFID 保持一致
+// inbox/page.tsx 裡現在是：
+// const OPEN_KFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
+const WECOM_OPENKFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
 
 function buildWelcomeText(opts: {
   preferredName?: string | null;
@@ -224,17 +229,23 @@ export async function POST(req: Request, { params }: RouteParams) {
     let sessionIdToUse: string | null = existing.sessionId ?? null;
     let kfUrlToUse: string | null = existing.kfUrl ?? null;
 
-    // ✅ H5 入口（mode=h5 或 hybrid 但 entryMode 被判定為 h5）：
-    // 為 H5/webchat 建 Session + 歡迎語
+    // ✅ H5 入口（mode=h5）：
+    // 為 H5/webchat／wechat 建 Session + 歡迎語
     if (existing.entryMode === "h5") {
-      const openKfid = H5_OPENKFID;
+      // 根據 scanChannel 判斷是「微信掃碼的 H5」還是「瀏覽器掃碼的 H5」
+      const scanChannel = existing.scanChannel || "browser";
+      const isWeChatScan = scanChannel === "wechat";
+
+      // ⭐ 核心調整：
+      // - 瀏覽器掃碼：openKfid = H5_OPENKFID, channel = "webchat"（出現在 Webchat tab）
+      // - 微信掃碼：  openKfid = WECOM_OPENKFID, channel = "wechat"（出現在 WeChat tab）
+      const openKfid = isWeChatScan ? WECOM_OPENKFID : H5_OPENKFID;
+      const channel = isWeChatScan ? "wechat" : "webchat";
 
       // 優先用 inputChannelIdentifier（browserId / openid），沒有就退回 vipNumber
       const identifierSource =
         existing.inputChannelIdentifier?.trim() || existing.vipNumber;
       const externalUserId = `h5:${identifierSource}`;
-
-      const channel = "webchat";
 
       const displayName =
         existing.inputPreferredName ||

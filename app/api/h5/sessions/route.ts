@@ -4,11 +4,15 @@ import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 
+// 和 /api/vip/approvals/[id] 裡用來創建 H5 Session 的 openKfId 保持一致
+const H5_OPENKFID = "H5_WEBCHAT_DEMO";
+
 export async function GET() {
   try {
     const sessions = await prisma.session.findMany({
       where: {
-        channel: "webchat", // 只拉 H5/webchat 渠道的會話
+        channel: "webchat",         // 只拉 H5 / webchat 渠道的會話
+        openKfid: H5_OPENKFID,      // 再限定在我們 H5 用的那個 openKfId
       },
       include: {
         vipGuest: true,
@@ -30,9 +34,12 @@ export async function GET() {
         s.displayName ||
         s.vipGuest?.preferredName ||
         s.vipGuest?.fullName ||
-        `VIP ${s.vipNumber}`,
-      lastMsgPreview: s.lastMsgPreview,
+        (s.vipNumber
+          ? `VIP ${s.vipNumber}`
+          : s.externalUserId || s.id),
+      lastMsgPreview: s.lastMsgPreview ?? "",
       vipNumber: s.vipNumber,
+      // 前端目前把 lastMsgAt 當 string 用，所以保持 toISOString
       lastMsgAt: (s.lastMsgAt ?? s.createdAt).toISOString(),
       unreadCount: s.unreadCount ?? 0,
       vipGuest: s.vipGuest
