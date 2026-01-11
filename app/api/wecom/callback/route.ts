@@ -74,7 +74,12 @@ export async function POST(req: Request) {
     const openKfid = String(open_kfid);
     const accessToken = await getWecomAccessToken();
 
-    console.log("[wecom callback] openKfid =", openKfid, "token =", tokenFromEvent);
+    console.log(
+      "[wecom callback] openKfid =",
+      openKfid,
+      "token =",
+      tokenFromEvent
+    );
 
     // 1) 通过 sync_msg 拉最近一批消息
     const syncResp = await fetch(
@@ -114,7 +119,7 @@ export async function POST(req: Request) {
       }))
     );
 
-    // 用来记录“本次确实新出现的、最后一条客户文本消息”
+    // 用来记录“本次确实新出现的、最后一条客户侧消息”
     let lastNewCustomerText:
       | {
           openKfid: string;
@@ -163,15 +168,11 @@ export async function POST(req: Request) {
         const rawScene: string | undefined =
           m.scene_param || (m as any).scene || (m as any).session_state;
 
-        console.log(
-          "[callback] rawScene for msg",
-          msgId,
-          "=",
-          rawScene
-        );
+        console.log("[callback] rawScene for msg", msgId, "=", rawScene);
 
         if (rawScene && typeof rawScene === "string") {
-          const prefix = "vip:";
+          const prefix = "vip:"
+          ;
           const idx = rawScene.indexOf(prefix);
           if (idx >= 0) {
             const vipNumber = rawScene.slice(idx + prefix.length).trim();
@@ -294,17 +295,19 @@ export async function POST(req: Request) {
         console.error("❌ failed to create message:", e);
       }
 
-      if (origin === "customer" && msgType === "text" && text) {
+      // ⭐ 关键修改：不再要求「文字訊息」，只要是客戶端方向的消息（包括進入會話 event），
+      // 就視為本次互動，用來觸發 pending VIP 綁定 + 歡迎語。
+      if (origin === "customer") {
         lastNewCustomerText = {
           openKfid,
           externalUserId,
-          content: text,
+          content: text ?? "",
           sessionId: session.id,
         };
       }
     }
 
-    // 2.3 如果这次有新的客户文本消息，并且有挂起的 VIP 绑定，就把 VIP 绑定到这个 externalUserId 上
+    // 2.3 如果这次有新的客户侧消息，并且有挂起的 VIP 绑定，就把 VIP 绑定到这个 externalUserId 上
     //     并发送一条高端酒店欢迎语
     if (lastNewCustomerText) {
       try {
@@ -422,10 +425,7 @@ export async function POST(req: Request) {
                 welcomeText
               );
             } catch (e) {
-              console.error(
-                "❌ failed to save welcome auto-reply:",
-                e
-              );
+              console.error("❌ failed to save welcome auto-reply:", e);
             }
           } catch (e) {
             console.error("❌ welcome auto-reply failed:", e);

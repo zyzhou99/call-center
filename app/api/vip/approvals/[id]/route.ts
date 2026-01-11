@@ -47,7 +47,8 @@ export async function GET(_req: Request, { params }: RouteParams) {
       );
     }
 
-    const approval = await prisma.pendingApproval.findUnique({
+    // ⭐ 改成 let，下面 fallback 可能會更新 approval
+    let approval = await prisma.pendingApproval.findUnique({
       where: { id },
       include: {
         vipGuest: {
@@ -66,6 +67,131 @@ export async function GET(_req: Request, { params }: RouteParams) {
         { ok: false, error: "NOT_FOUND" },
         { status: 200 }
       );
+    }
+
+    // ⭐ Fallback：針對 mode=h5 的流程，
+    // 如果這條申請已 APPROVED 但還沒有 sessionId，
+    // 在這裡補建 / 補綁 Session，確保 /vip-pending 可以拿到 sessionId 跳 /vip-chat。
+    if (
+      approval.status === "APPROVED" &&
+      approval.entryMode === "h5" &&
+      !approval.sessionId
+    ) {
+      const now = new Date();
+
+      const scanChannel = approval.scanChannel || "browser";
+      const isWeChatScan = scanChannel === "wechat";
+
+      // 和 POST 裡保持一致：
+      // - 微信掃碼：出現在 WeChat tab（用企微 openKfid）
+      // - 瀏覽器掃碼：出現在 Webchat tab（用 H5_OPENKFID）
+      const openKfid = isWeChatScan ? WECOM_OPENKFID : H5_OPENKFID;
+      const channel = isWeChatScan ? "wechat" : "webchat";
+
+      // 優先用 inputChannelIdentifier（browserId / openid），沒有就退回 vipNumber
+      const identifierSource =
+        (approval as any).inputChannelIdentifier?.trim() ||
+        approval.vipNumber;
+      const externalUserId = `h5:${identifierSource}`;
+
+      // 先看是否已經有 Session（避免重複建）
+      const existingSession = await prisma.session.findUnique({
+        where: {
+          openKfid_externalUserId: {
+            openKfid,
+            externalUserId,
+          },
+        },
+      });
+
+      let sessionIdToUse: string | null = approval.sessionId ?? null;
+
+      if (existingSession) {
+        // 已有會話：直接用它的 id 回填到 pendingApproval
+        sessionIdToUse = existingSession.id;
+      } else {
+        // 沒有會話時才補建一次（和 POST 裡邏輯保持一致）
+        const displayName =
+          (approval as any).inputPreferredName ||
+          approval.vipGuest?.preferredName ||
+          approval.vipGuest?.fullName ||
+          `VIP ${approval.vipNumber}`;
+
+        const welcomeText = buildWelcomeText({
+          preferredName:
+            (approval as any).inputPreferredName ??
+            approval.vipGuest?.preferredName,
+          vipNumber: approval.vipNumber,
+        });
+
+        const session = await prisma.session.upsert({
+          where: {
+            openKfid_externalUserId: {
+              openKfid,
+              externalUserId,
+            },
+          },
+          update: {
+            displayName,
+            channel,
+            vipNumber: approval.vipNumber,
+            vipGuestId: approval.vipGuestId,
+            lastMsgAt: now,
+            lastMsgPreview: welcomeText,
+          },
+          create: {
+            openKfid,
+            externalUserId,
+            displayName,
+            channel,
+            vipNumber: approval.vipNumber,
+            vipGuestId: approval.vipGuestId,
+            lastMsgAt: now,
+            lastMsgPreview: welcomeText,
+          },
+        });
+
+        sessionIdToUse = session.id;
+
+        // 寫一條系統歡迎語到 Message（和 POST 裡一致）
+        await prisma.message.create({
+          data: {
+            msgId: `vip-welcome-${session.id}-${now.getTime()}`,
+            openKfid,
+            externalUserId,
+            origin: "system",
+            msgType: "text",
+            sendTime: now,
+            payload: JSON.stringify({
+              type: "system_welcome",
+              text: welcomeText,
+            }),
+            direction: "out",
+            text: welcomeText,
+            hasSensitive: false,
+            sensitiveHits: null,
+            sessionId: session.id,
+          },
+        });
+      }
+
+      // 如果確實拿到了 sessionId，且 DB 裡還是 null，就回填一次
+      if (sessionIdToUse && !approval.sessionId) {
+        approval = await prisma.pendingApproval.update({
+          where: { id },
+          data: { sessionId: sessionIdToUse },
+          include: {
+            vipGuest: {
+              select: {
+                fullName: true,
+                preferredName: true,
+                tier: true,
+                room: true,
+              },
+            },
+          },
+        });
+      }
     }
 
     return NextResponse.json(
