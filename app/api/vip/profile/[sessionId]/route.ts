@@ -38,10 +38,7 @@ export async function GET(_req: Request, { params }: Params) {
     // 拼成 GuestProfilePanel 期待的结构
     const profile = {
       conversationId: session.id,
-      name:
-        g.fullName ||
-        g.preferredName ||
-        `VIP ${g.vipNumber}`,
+      name: g.fullName || g.preferredName || `VIP ${g.vipNumber}`,
       preferredName: g.preferredName || null,
       vipNumber: g.vipNumber,
       vipTier: g.tier || "Gold", // 没填 tier 的话给个默认
@@ -54,6 +51,9 @@ export async function GET(_req: Request, { params }: Params) {
         : "",
       segment: g.segment || "",
       statusLabel: g.statusLabel || "",
+      // ⭐ 新增：把喜好 / 忌讳带给前端
+      preference: g.preference || "",
+      restriction: g.restriction || "",
     };
 
     return NextResponse.json({

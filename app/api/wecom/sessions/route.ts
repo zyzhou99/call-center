@@ -56,10 +56,7 @@ export async function GET(req: NextRequest) {
         externalUserId: s.externalUserId,
         // ⭐ 優先用 VIP 的名字，沒有再 fallback
         displayName:
-          displayNameFromVip ||
-          s.displayName ||
-          s.externalUserId ||
-          s.id,
+          displayNameFromVip || s.displayName || s.externalUserId || s.id,
         channel: s.channel,
         lastMsgAt: s.lastMsgAt,
         lastMsgPreview: s.lastMsgPreview,
@@ -78,7 +75,10 @@ export async function GET(req: NextRequest) {
               checkOutDate: g.checkOutDate,
               segment: g.segment,
               statusLabel: g.statusLabel,
-              // 如果你在 VipGuest 裡加了下面幾個喜好字段，也一起帶出去
+              // ⭐ 新增：schema 裡的 preference / restriction
+              preference: g.preference,
+              restriction: g.restriction,
+              // 下面這幾個老字段先保留，不影響現在邏輯
               stayPreference: (g as any).stayPreference ?? null,
               diningPreference: (g as any).diningPreference ?? null,
               travelPreference: (g as any).travelPreference ?? null,
