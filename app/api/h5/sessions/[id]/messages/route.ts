@@ -1,5 +1,5 @@
 // app/api/h5/sessions/[id]/messages/route.ts
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
@@ -8,26 +8,31 @@ interface RouteParams {
   params: { id: string };
 }
 
-// 映射成前端 ChatPanel 用的 Message 結構
-function mapDbMessageToUiMessage(m: any) {
-  const sendTime =
-    m.sendTime instanceof Date ? m.sendTime : new Date(m.sendTime);
+// 映射成前端 ChatPanel / inbox 用的 Message 結構
+function mapDbMessageToUi(m: any, sessionId: string) {
+  const ts =
+    m.sendTime instanceof Date ? m.sendTime.getTime() : Date.now();
 
   return {
     id: m.id,
-    conversationId: m.sessionId,
-    direction: m.direction === "out" ? "out" : "in", // out: concierge, in: VIP
+    conversationId: sessionId,
+    direction: m.direction === "out" ? "out" : "in",
     text: m.text || "",
-    timeLabel: sendTime.toLocaleTimeString("en-US", {
+    timestamp: ts,
+    timeLabel: new Date(ts).toLocaleTimeString("en-US", {
       hour: "numeric",
       minute: "2-digit",
     }),
-    timestamp: sendTime.getTime(),
   };
 }
 
-// 拉 H5 / webchat 會話的所有消息（Inbox & /vip-chat 都會用到）
-export async function GET(req: Request, { params }: RouteParams) {
+/**
+ * GET /api/h5/sessions/[id]/messages?take=100
+ * 拉取某個 H5 Session 的消息（包含：
+ * - channel = "webchat"（瀏覽器 H5）
+ * - channel = "wechat"（mode=h5 下，微信內打開 H5 的那一種）
+ */
+export async function GET(req: NextRequest, { params }: RouteParams) {
   try {
     const sessionId = params.id;
     if (!sessionId) {
@@ -37,25 +42,31 @@ export async function GET(req: Request, { params }: RouteParams) {
       );
     }
 
-    const url = new URL(req.url);
-    const takeParam = url.searchParams.get("take");
-    const take = takeParam
-      ? Math.min(200, Math.max(1, parseInt(takeParam, 10)))
-      : 50;
+    const { searchParams } = new URL(req.url);
+    const takeParam = searchParams.get("take");
+    const take = takeParam ? Math.min(Number(takeParam) || 100, 200) : 100;
 
-    const rows = await prisma.message.findMany({
+    const session = await prisma.session.findUnique({
+      where: { id: sessionId },
+    });
+
+    if (!session) {
+      return NextResponse.json(
+        { ok: false, error: "SESSION_NOT_FOUND" },
+        { status: 404 }
+      );
+    }
+
+    const messages = await prisma.message.findMany({
       where: { sessionId },
-      orderBy: { sendTime: "asc" }, // 時間升序
+      orderBy: { sendTime: "asc" },
       take,
     });
 
-    const messages = rows.map(mapDbMessageToUiMessage);
+    const payload = messages.map((m) => mapDbMessageToUi(m, sessionId));
 
     return NextResponse.json(
-      {
-        ok: true,
-        messages,
-      },
+      { ok: true, messages: payload },
       { status: 200 }
     );
   } catch (err) {
@@ -67,8 +78,21 @@ export async function GET(req: Request, { params }: RouteParams) {
   }
 }
 
-// 寫入一條 H5 消息（VIP 或客服均可調用）
-export async function POST(req: Request, { params }: RouteParams) {
+/**
+ * POST /api/h5/sessions/[id]/messages
+ *
+ * body:
+ *  { text: string, from: "guest" | "agent" | "system" }
+ *
+ * - guest  => 方向為 in，unreadCount 需要 +1
+ * - agent  => 方向為 out，不動 unreadCount
+ * - system => 方向為 out，不動 unreadCount
+ *
+ * ✨ 重點：不管這個 session 是 channel = "webchat" 還是 "wechat"
+ * 只要是 from = "guest"，都要給 session.unreadCount +1，
+ * 這樣 inbox 的小紅點才會隨後續消息正常跳。
+ */
+export async function POST(req: NextRequest, { params }: RouteParams) {
   try {
     const sessionId = params.id;
     if (!sessionId) {
@@ -78,21 +102,19 @@ export async function POST(req: Request, { params }: RouteParams) {
       );
     }
 
-    const body = (await req.json().catch(() => ({}))) as {
-      text?: string;
-      from?: "vip" | "agent" | "system";
-    };
+    const body = (await req.json().catch(() => null)) as any;
+    const rawText = typeof body?.text === "string" ? body.text : "";
+    const text = rawText.trim();
 
-    const rawText = body.text?.trim();
-    if (!rawText) {
+    if (!text) {
       return NextResponse.json(
         { ok: false, error: "EMPTY_TEXT" },
         { status: 400 }
       );
     }
 
-    const from: "vip" | "agent" | "system" =
-      body.from === "agent" || body.from === "system" ? body.from : "vip";
+    const from =
+      typeof body?.from === "string" ? body.from.toLowerCase() : "guest";
 
     const session = await prisma.session.findUnique({
       where: { id: sessionId },
@@ -106,34 +128,50 @@ export async function POST(req: Request, { params }: RouteParams) {
     }
 
     const now = new Date();
-    const msgId = `h5-${sessionId}-${Date.now()}-${Math.random()
-      .toString(36)
-      .slice(2)}`;
+
+    const direction = from === "agent" || from === "system" ? "out" : "in";
+    const origin =
+      from === "agent"
+        ? "agent"
+        : from === "system"
+        ? "system"
+        : "external";
+
+    const msgId = `h5-${sessionId}-${now.getTime()}`;
 
     const created = await prisma.message.create({
       data: {
         msgId,
-        openKfid: session.openKfid || "H5",
+        openKfid: session.openKfid,
         externalUserId: session.externalUserId,
-        origin: "h5",
+        origin,
         msgType: "text",
         sendTime: now,
-        payload: JSON.stringify({ content: rawText }),
-        direction: from === "vip" ? "in" : "out",
-        text: rawText,
-        sessionId,
+        payload: JSON.stringify({
+          type: "h5_text",
+          from,
+          text,
+        }),
+        direction,
+        text,
+        hasSensitive: false,
+        sensitiveHits: null,
+        sessionId: session.id,
       },
     });
 
-    const currentUnread = session.unreadCount ?? 0;
-    const nextUnread =
-      from === "vip" ? currentUnread + 1 : currentUnread; // 只有 VIP 發才算未讀
+    // ⭐ 重點：客人發消息才需要增加 unreadCount
+    const shouldIncreaseUnread = direction === "in";
+
+    const nextUnread = shouldIncreaseUnread
+      ? (session.unreadCount ?? 0) + 1
+      : session.unreadCount ?? 0;
 
     await prisma.session.update({
-      where: { id: sessionId },
+      where: { id: session.id },
       data: {
         lastMsgAt: now,
-        lastMsgPreview: rawText,
+        lastMsgPreview: text,
         unreadCount: nextUnread,
       },
     });
@@ -141,7 +179,7 @@ export async function POST(req: Request, { params }: RouteParams) {
     return NextResponse.json(
       {
         ok: true,
-        message: mapDbMessageToUiMessage(created),
+        message: mapDbMessageToUi(created, sessionId),
       },
       { status: 200 }
     );

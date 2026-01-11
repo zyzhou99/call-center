@@ -36,6 +36,10 @@ const OPEN_KFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
 const ADMIN = "sync123";
 const CHANNEL_STORAGE_KEY = "cc_active_channel";
 
+// ⭐ 新增：未讀基線存儲 key
+const WECOM_UNREAD_BASE_STORAGE_KEY = "cc_wecom_unread_base";
+const H5_UNREAD_BASE_STORAGE_KEY = "cc_h5_unread_base";
+
 // Channel 类型里已经包含了 "vipRequests"
 type InboxChannel = Channel;
 
@@ -86,6 +90,37 @@ function InboxContent() {
 
   // URL 里带进来的 sessionId（来自 /vip-access 跳转，目前用于 wechat）
   const sessionIdFromUrl = searchParams.get("sessionId");
+
+  // ⭐ 初始化：從 localStorage 恢復 wechat / webchat 的未讀基線
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    try {
+      const rawWecom = window.localStorage.getItem(
+        WECOM_UNREAD_BASE_STORAGE_KEY
+      );
+      if (rawWecom) {
+        const parsed = JSON.parse(rawWecom);
+        if (parsed && typeof parsed === "object") {
+          wecomUnreadBaseRef.current = parsed as Record<string, number>;
+        }
+      }
+    } catch (e) {
+      console.error("load wecom unread base failed:", e);
+    }
+
+    try {
+      const rawH5 = window.localStorage.getItem(H5_UNREAD_BASE_STORAGE_KEY);
+      if (rawH5) {
+        const parsed = JSON.parse(rawH5);
+        if (parsed && typeof parsed === "object") {
+          h5UnreadBaseRef.current = parsed as Record<string, number>;
+        }
+      }
+    } catch (e) {
+      console.error("load h5 unread base failed:", e);
+    }
+  }, []);
 
   // 初始化：从 localStorage 恢复上次的 channel
   useEffect(() => {
@@ -241,9 +276,9 @@ function InboxContent() {
           const rawUnread = conv.unreadCount || 0;
           serverUnreads[conv.id] = rawUnread;
 
-          if (conv.id === activeConversationId) {
-            base[conv.id] = rawUnread;
-          } else if (!(conv.id in base)) {
+          if (!(conv.id in base)) {
+            // 🆕 第一次看到这个会话：把「当前服务器未读」当成已读基线
+            // 以后只有 rawUnread 往上长出来的部分才算「新未读」
             base[conv.id] = rawUnread;
           }
         });
@@ -251,19 +286,26 @@ function InboxContent() {
         wecomServerUnreadsRef.current = serverUnreads;
         wecomUnreadBaseRef.current = base;
 
+        // 持久化一下基线，刷新页面时还能对得上
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(
+              WECOM_UNREAD_BASE_STORAGE_KEY,
+              JSON.stringify(base)
+            );
+          } catch (e) {
+            console.error("save wecom unread base (poll) failed:", e);
+          }
+        }
+
         const convList: Conversation[] = serverConvs.map((conv) => {
           const rawUnread = serverUnreads[conv.id] || 0;
           const baseUnread = base[conv.id] || 0;
           const effectiveUnread = Math.max(0, rawUnread - baseUnread);
 
-          const unreadCount =
-            activeConversationId && conv.id === activeConversationId
-              ? 0
-              : effectiveUnread;
-
           return {
             ...conv,
-            unreadCount,
+            unreadCount: effectiveUnread,
           };
         });
 
@@ -275,19 +317,17 @@ function InboxContent() {
       }
     };
 
-    // 初始化先拉一次
+    // 始终后台轮询 WeCom 会话
     fetchSessions();
-
-    // 只有在微信渠道下才轮询更新会话列表
-    if (activeChannel === "wechat") {
-      timer = setInterval(fetchSessions, 5000);
-    }
+    timer = setInterval(fetchSessions, 5000);
 
     return () => {
       stopped = true;
       if (timer) clearInterval(timer);
     };
-  }, [activeChannel, activeConversationId]);
+  }, []); // ✅ 不再依赖 activeConversationId
+
+
 
   // 加载 + 轮询 H5 / webchat 会话列表（瀏覽器 H5）
   useEffect(() => {
@@ -313,6 +353,7 @@ function InboxContent() {
           serverUnreads[id] = rawUnread;
 
           if (!(id in base)) {
+            // H5 webchat 原來就是以 server 未讀作為基線（第一次不亮點）
             base[id] = rawUnread;
           }
 
@@ -349,6 +390,17 @@ function InboxContent() {
 
         h5ServerUnreadsRef.current = serverUnreads;
         h5UnreadBaseRef.current = base;
+
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(
+              H5_UNREAD_BASE_STORAGE_KEY,
+              JSON.stringify(base)
+            );
+          } catch (e) {
+            console.error("save h5 unread base failed:", e);
+          }
+        }
 
         setH5Conversations(convList);
       } catch (e) {
@@ -568,6 +620,17 @@ function InboxContent() {
             [conversationId]: serverUnreads[conversationId] || 0,
           };
 
+          if (typeof window !== "undefined") {
+            try {
+              window.localStorage.setItem(
+                WECOM_UNREAD_BASE_STORAGE_KEY,
+                JSON.stringify(wecomUnreadBaseRef.current)
+              );
+            } catch (e) {
+              console.error("save wecom unread base (select h5-wechat) failed:", e);
+            }
+          }
+
           setWecomConversations((prev) =>
             prev.map((c) =>
               c.id === conversationId ? { ...c, unreadCount: 0 } : c
@@ -600,6 +663,17 @@ function InboxContent() {
             [conversationId]: serverUnreads[conversationId] || 0,
           };
 
+          if (typeof window !== "undefined") {
+            try {
+              window.localStorage.setItem(
+                WECOM_UNREAD_BASE_STORAGE_KEY,
+                JSON.stringify(wecomUnreadBaseRef.current)
+              );
+            } catch (e) {
+              console.error("save wecom unread base (select wecom) failed:", e);
+            }
+          }
+
           setWecomConversations((prev) =>
             prev.map((c) =>
               c.id === conversationId ? { ...c, unreadCount: 0 } : c
@@ -610,20 +684,37 @@ function InboxContent() {
         }
       }
 
-      // 無論哪一種 wechat 會話，都嘗試拉 VIP Profile
-      try {
-        const resp = await fetch(
-          `/api/vip/profile/${encodeURIComponent(conversationId)}`
-        );
-        const data = await resp.json();
-        if (data?.ok && data.profile) {
-          setActiveProfile(data.profile as GuestProfile);
-        } else {
-          setActiveProfile(null);
-        }
-      } catch (e) {
-        console.error("load VIP profile failed:", e);
+      // ⭐ 先用 Session 自帶的 vipGuest 填右側 Profile（確保能顯示 preferredName）
+      const vipGuest = (conv as any).vipGuest;
+
+      if (vipGuest) {
+        const profileFromSession: GuestProfile = {
+          ...(vipGuest as any),
+          // GuestProfile 里用的是 name，從 preferredName / fullName 映射過來
+          name:
+            (vipGuest.preferredName as string) ||
+            (vipGuest.fullName as string) ||
+            (conv.displayName as string) ||
+            "",
+        };
+
+        setActiveProfile(profileFromSession);
+      } else {
+        // 如果這個會話上暫時沒有 vipGuest，就先清空，
+        // 然後再嘗試走後端兜底查一次（避免完全沒有資料）
         setActiveProfile(null);
+
+        try {
+          const resp = await fetch(
+            `/api/vip/profile/${encodeURIComponent(conversationId)}`
+          );
+          const data = await resp.json();
+          if (data?.ok && data.profile) {
+            setActiveProfile(data.profile as GuestProfile);
+          }
+        } catch (e) {
+          console.error("load VIP profile (fallback) failed:", e);
+        }
       }
 
       return;
@@ -671,6 +762,17 @@ function InboxContent() {
           ...h5UnreadBaseRef.current,
           [conversationId]: serverUnreads[conversationId] || 0,
         };
+
+        if (typeof window !== "undefined") {
+          try {
+            window.localStorage.setItem(
+              H5_UNREAD_BASE_STORAGE_KEY,
+              JSON.stringify(h5UnreadBaseRef.current)
+            );
+          } catch (e) {
+            console.error("save h5 unread base (select webchat) failed:", e);
+          }
+        }
 
         setH5Conversations((prev) =>
           prev.map((c) =>

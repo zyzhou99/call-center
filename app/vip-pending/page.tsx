@@ -40,6 +40,9 @@ export default function VipPendingPage() {
 
   // 🔑 一定要用 "pendingId"，跟 /vip-access 里保持一致
   const pendingId = searchParams.get("pendingId");
+  const redirectKey = pendingId
+    ? `vip_pending_redirect_${pendingId}`
+    : null;
 
   const [status, setStatus] = useState<PendingStatus>("INIT");
   const [message, setMessage] = useState<string>("");
@@ -68,9 +71,18 @@ export default function VipPendingPage() {
       return;
     }
 
+    // 看這個 pendingId 是否已經做過一次自動跳轉
+    const alreadyRedirected =
+      typeof window !== "undefined" &&
+      redirectKey &&
+      window.sessionStorage.getItem(redirectKey) === "1";
+
     let stopped = false;
+    let timer: ReturnType<typeof setInterval> | null = null;
 
     async function checkOnce() {
+      if (stopped) return;
+
       try {
         const res = await fetch(
           `/api/vip/approvals/${encodeURIComponent(pendingId!)}`
@@ -103,20 +115,51 @@ export default function VipPendingPage() {
         if (s === "APPROVED") {
           clearPendingLocalState();
           setStatus("APPROVED");
+
+          // 如果之前已經為這個 pendingId 自動打開過企業微信了，就不再自動跳轉
+          if (alreadyRedirected) {
+            setMessage(
+              "Your identity has been verified. You may now continue in the concierge chat."
+            );
+            setReason(null);
+            // 不再跳轉，直接停掉輪詢
+            stopped = true;
+            if (timer) clearInterval(timer);
+            return;
+          }
+
           setMessage("Your identity has been verified. Connecting you now...");
+          setReason(null);
 
           // ✅ CASE 1：企業微信客服鏈路（WeCom hybrid）
           if (approval.kfUrl) {
-            // ⭐ 這行是新加的：避免輪詢時不停重複跳轉
             stopped = true;
+            if (timer) clearInterval(timer);
+
+            // 做個“已跳轉過”的標記，防止之後再次打開 /vip-pending 一直重定向
+            if (
+              redirectKey &&
+              typeof window !== "undefined"
+            ) {
+              window.sessionStorage.setItem(redirectKey, "1");
+            }
+
             window.location.href = approval.kfUrl;
             return;
           }
 
           // ✅ CASE 2：H5 webchat 鏈路（/vip-chat）
           if (approval.sessionId) {
-            // ⭐ 同理，先把 stopped 設為 true
             stopped = true;
+            if (timer) clearInterval(timer);
+
+            if (
+              redirectKey &&
+              typeof window !== "undefined"
+            ) {
+              window.sessionStorage.setItem(redirectKey, "1");
+            }
+
             window.location.href = `/vip-chat?sessionId=${encodeURIComponent(
               approval.sessionId
             )}`;
@@ -166,13 +209,13 @@ export default function VipPendingPage() {
     // 先查一次
     checkOnce();
     // 然後每 3 秒輪詢一次狀態
-    const timer = setInterval(checkOnce, POLL_INTERVAL_MS);
+    timer = setInterval(checkOnce, POLL_INTERVAL_MS);
 
     return () => {
       stopped = true;
-      clearInterval(timer);
+      if (timer) clearInterval(timer);
     };
-  }, [pendingId]);
+  }, [pendingId, redirectKey]);
 
   const isErrorLike =
     status === "MISSING" ||

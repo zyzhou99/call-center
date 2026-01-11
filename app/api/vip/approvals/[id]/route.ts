@@ -1,6 +1,7 @@
 // app/api/vip/approvals/[id]/route.ts
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
+import { setPendingVipBinding } from "@/lib/vipBindingState";
 
 export const runtime = "nodejs";
 
@@ -223,6 +224,33 @@ export async function POST(req: Request, { params }: RouteParams) {
       );
     }
 
+    // 如果這次審批單上有客人輸入的 preferredName，
+    // 優先同步到 VipGuest.preferredName，
+    // 這樣會話列表 / 歡迎語 / VIP Profile 都用這個名字。
+    if (
+      existing.vipGuestId &&
+      typeof existing.inputPreferredName === "string" &&
+      existing.inputPreferredName.trim()
+    ) {
+      const newPreferred = existing.inputPreferredName.trim();
+
+      try {
+        await prisma.vipGuest.update({
+          where: { id: existing.vipGuestId },
+          data: { preferredName: newPreferred },
+        });
+        console.log("[vipApproval] updated vipGuest.preferredName", {
+          vipGuestId: existing.vipGuestId,
+          preferredName: newPreferred,
+        });
+      } catch (e) {
+        console.error(
+          "[vipApproval] failed to update vipGuest.preferredName",
+          e
+        );
+      }
+    }
+
     // --------- 情況二：APPROVED，要為 H5 / WeCom 做不同處理 ---------
 
     // 先沿用 DB 裡已有的值（理論上大多數情況都是 null）
@@ -315,6 +343,24 @@ export async function POST(req: Request, { params }: RouteParams) {
     // 審批通過後，直接設置企業微信客服鏈接，讓 /vip-pending 跳過去。
     if (existing.entryMode === "wecom") {
       kfUrlToUse = WECOM_FIXED_KF_URL;
+
+      // ⭐⭐ 关键：在這裡把這個 VIP 掛到當前 openKfid（企業微信客服賬號）上
+      // WECOM_OPENKFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw"
+      if (existing.vipGuestId && existing.vipNumber) {
+        setPendingVipBinding(
+          WECOM_OPENKFID,
+          existing.vipGuestId,
+          existing.vipNumber
+        );
+      } else {
+        console.warn(
+          "[vipApproval] entryMode=wecom but missing vipGuestId/vipNumber",
+          {
+            vipGuestId: existing.vipGuestId,
+            vipNumber: existing.vipNumber,
+          }
+        );
+      }
     }
 
     // 4) 回填 PendingApproval 的狀態 & sessionId / kfUrl

@@ -74,6 +74,8 @@ export async function POST(req: Request) {
     const openKfid = String(open_kfid);
     const accessToken = await getWecomAccessToken();
 
+    console.log("[wecom callback] openKfid =", openKfid, "token =", tokenFromEvent);
+
     // 1) 通过 sync_msg 拉最近一批消息
     const syncResp = await fetch(
       `https://qyapi.weixin.qq.com/cgi-bin/kf/sync_msg?access_token=${encodeURIComponent(
@@ -108,6 +110,7 @@ export async function POST(req: Request) {
         text: m.text?.content,
         external_userid: m.external_userid,
         scene_param: m.scene_param,
+        session_state: (m as any).session_state,
       }))
     );
 
@@ -160,15 +163,38 @@ export async function POST(req: Request) {
         const rawScene: string | undefined =
           m.scene_param || (m as any).scene || (m as any).session_state;
 
+        console.log(
+          "[callback] rawScene for msg",
+          msgId,
+          "=",
+          rawScene
+        );
+
         if (rawScene && typeof rawScene === "string") {
           const prefix = "vip:";
           const idx = rawScene.indexOf(prefix);
           if (idx >= 0) {
             const vipNumber = rawScene.slice(idx + prefix.length).trim();
+            console.log(
+              "[callback] parsed vipNumber from scene_param:",
+              vipNumber
+            );
+
             if (vipNumber) {
               vipGuest = await prisma.vipGuest.findUnique({
                 where: { vipNumber },
               });
+              if (vipGuest) {
+                console.log(
+                  "[callback] found vipGuest from scene_param:",
+                  vipGuest.vipNumber
+                );
+              } else {
+                console.log(
+                  "[callback] vipGuest not found for vipNumber:",
+                  vipNumber
+                );
+              }
             }
           }
         }
@@ -279,11 +305,42 @@ export async function POST(req: Request) {
     }
 
     // 2.3 如果这次有新的客户文本消息，并且有挂起的 VIP 绑定，就把 VIP 绑定到这个 externalUserId 上
-    //     并发送一条高端酒店欢迎语，而不是「已收到：xxx」
+    //     并发送一条高端酒店欢迎语
     if (lastNewCustomerText) {
       try {
-        const pending = consumePendingVipBinding(openKfid);
-        if (pending) {
+        let pending: any = null;
+
+        // ⭐ 先用 Token 試圖讀取 pending，這對應的是「以 config_id / Token 為 key 存的方案」
+        if (tokenFromEvent) {
+          pending = consumePendingVipBinding(String(tokenFromEvent));
+          if (pending) {
+            console.log(
+              "✅ found pending VIP via Token:",
+              tokenFromEvent,
+              pending.vipNumber
+            );
+          }
+        }
+
+        // ⭐ 如果 Token 沒取到，再用 openKfid 試一次（對應你之前 openKfid 為 key 的實現）
+        if (!pending) {
+          pending = consumePendingVipBinding(openKfid);
+          if (pending) {
+            console.log(
+              "✅ found pending VIP via openKfid:",
+              openKfid,
+              pending.vipNumber
+            );
+          }
+        }
+
+        if (!pending) {
+          console.log(
+            "ℹ️ no pending VIP binding for Token/openKfid:",
+            tokenFromEvent,
+            openKfid
+          );
+        } else {
           await prisma.session.updateMany({
             where: {
               openKfid,
@@ -380,7 +437,6 @@ export async function POST(req: Request) {
     }
 
     // 不再发送「已收到：xxx」的自动回复
-
     return new NextResponse("success", { status: 200 });
   } catch (e: any) {
     console.error("callback bot error:", e);
