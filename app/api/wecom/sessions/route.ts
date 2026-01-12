@@ -78,6 +78,9 @@ export async function GET(req: NextRequest) {
               checkOutDate: g.checkOutDate,
               segment: g.segment,
               statusLabel: g.statusLabel,
+              // ⭐ 新增：schema 裡的 preference / restriction
+              preference: g.preference,
+              restriction: g.restriction,
               // 如果你在 VipGuest 裡加了下面幾個喜好字段，也一起帶出去
               stayPreference: (g as any).stayPreference ?? null,
               diningPreference: (g as any).diningPreference ?? null,

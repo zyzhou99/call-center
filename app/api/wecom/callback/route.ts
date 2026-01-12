@@ -16,6 +16,111 @@ function getCrypt() {
   return new WXBizMsgCrypt(token, aesKey, corpId);
 }
 
+// ====== 新增：1 分鐘未回覆自動提示相關 ======
+const AUTO_REPLY_DELAY_MS = 60 * 1000;
+const AUTO_REPLY_TEXT =
+  "尊敬的贵宾，当前正值服务高峰，請您稍等片刻。";
+
+type NoReplyTimer = ReturnType<typeof setTimeout>;
+const noReplyTimers = new Map<string, NoReplyTimer>();
+
+function scheduleNoAgentReplyReminder(opts: {
+  sessionId: string;
+  openKfid: string;
+  externalUserId: string;
+  lastCustomerSendTime: Date;
+}) {
+  const key = opts.sessionId;
+
+  // 如果這個會話之前已經設置過計時器，先清掉
+  const existing = noReplyTimers.get(key);
+  if (existing) {
+    clearTimeout(existing);
+    noReplyTimers.delete(key);
+  }
+
+  const timeout = setTimeout(() => {
+    (async () => {
+      noReplyTimers.delete(key);
+
+      try {
+        // 1) 檢查這條客戶消息之後，有沒有客服的輸出消息
+        const agentReplyCount = await prisma.message.count({
+          where: {
+            sessionId: opts.sessionId,
+            origin: "agent",
+            direction: "out",
+            sendTime: { gt: opts.lastCustomerSendTime },
+          },
+        });
+
+        if (agentReplyCount > 0) {
+          // 已經有客服回覆了，就不發自動提示
+          console.log(
+            "[no-reply auto] agent already replied, skip. sessionId=",
+            opts.sessionId
+          );
+          return;
+        }
+
+        // 2) 沒有客服回覆 -> 發自動提示（企業微信）
+        const accessToken = await getWecomAccessToken();
+        const sendResp = await fetch(
+          `https://qyapi.weixin.qq.com/cgi-bin/kf/send_msg?access_token=${encodeURIComponent(
+            accessToken
+          )}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              open_kfid: opts.openKfid,
+              touser: opts.externalUserId,
+              msgtype: "text",
+              text: { content: AUTO_REPLY_TEXT },
+            }),
+          }
+        );
+
+        const sendData = await sendResp.json();
+        console.log(
+          "✅ no-reply auto message send_msg:",
+          sendData
+        );
+
+        // 3) 把這條自動提示寫入 Message 表
+        const botMsgId = String(
+          sendData.msgid || `no-reply-${Date.now()}`
+        );
+
+        await prisma.message.create({
+          data: {
+            msgId: botMsgId,
+            openKfid: opts.openKfid,
+            externalUserId: opts.externalUserId,
+            origin: "bot",
+            msgType: "text",
+            sendTime: new Date(),
+            payload: JSON.stringify(sendData),
+            direction: "out",
+            text: AUTO_REPLY_TEXT,
+            sessionId: opts.sessionId,
+          },
+        });
+
+        console.log(
+          "✅ saved no-reply auto message:",
+          botMsgId,
+          AUTO_REPLY_TEXT
+        );
+      } catch (e) {
+        console.error("❌ no-reply auto message failed:", e);
+      }
+    })();
+  }, AUTO_REPLY_DELAY_MS);
+
+  noReplyTimers.set(key, timeout);
+}
+
 // 企业微信后台“保存配置”时的 URL 验证
 export async function GET(req: Request) {
   try {
@@ -119,7 +224,7 @@ export async function POST(req: Request) {
       }))
     );
 
-    // 用来记录“本次确实新出现的、最后一条客户侧消息”
+    // 用来记录“本次确实新出现的、最后一条客户侧消息”（用於 VIP 歡迎語）
     let lastNewCustomerText:
       | {
           openKfid: string;
@@ -171,8 +276,7 @@ export async function POST(req: Request) {
         console.log("[callback] rawScene for msg", msgId, "=", rawScene);
 
         if (rawScene && typeof rawScene === "string") {
-          const prefix = "vip:"
-          ;
+          const prefix = "vip:";
           const idx = rawScene.indexOf(prefix);
           if (idx >= 0) {
             const vipNumber = rawScene.slice(idx + prefix.length).trim();
@@ -269,8 +373,9 @@ export async function POST(req: Request) {
       }
 
       // 2.2 写入 Message 表（payload 一定要是字符串）
+      let savedMessage: any = null;
       try {
-        await prisma.message.create({
+        savedMessage = await prisma.message.create({
           data: {
             msgId,
             openKfid,
@@ -295,8 +400,18 @@ export async function POST(req: Request) {
         console.error("❌ failed to create message:", e);
       }
 
-      // ⭐ 关键修改：不再要求「文字訊息」，只要是客戶端方向的消息（包括進入會話 event），
-      // 就視為本次互動，用來觸發 pending VIP 綁定 + 歡迎語。
+      // ⭐ 新增：1 分鐘無客服回覆自動提示（只對客戶文字消息啟動）
+      if (origin === "customer" && msgType === "text" && text && savedMessage) {
+        scheduleNoAgentReplyReminder({
+          sessionId: session.id,
+          openKfid,
+          externalUserId,
+          lastCustomerSendTime: sendTime,
+        });
+      }
+
+      // ⭐ VIP 歡迎語這裡維持之前的邏輯：只要是客戶端方向的消息（包括進入會話 event），
+      //    就視為本次互動，用來觸發 pending VIP 綁定 + 歡迎語。
       if (origin === "customer") {
         lastNewCustomerText = {
           openKfid,
@@ -425,7 +540,10 @@ export async function POST(req: Request) {
                 welcomeText
               );
             } catch (e) {
-              console.error("❌ failed to save welcome auto-reply:", e);
+              console.error(
+                "❌ failed to save welcome auto-reply:",
+                e
+              );
             }
           } catch (e) {
             console.error("❌ welcome auto-reply failed:", e);

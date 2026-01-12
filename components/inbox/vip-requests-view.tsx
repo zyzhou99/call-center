@@ -29,7 +29,7 @@ interface VipRequestItem {
   createdAt: string;
 
   // 這兩個字段暫時後端未必有，但先留著
-  channelIdentifier?: string | null;
+  inputChannelIdentifier?: string | null;
   nicknameFromChannel?: string | null;
 
   vipGuest?: VipGuestLite | null;
@@ -331,7 +331,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
   return (
     <div
       className="flex flex-1 overflow-hidden"
-      style={{ backgroundColor: "#FAF7F1" }}
+      style={{ backgroundColor: "#ffffffff" }}
     >
       {/* 左側列表 */}
       <div
@@ -541,12 +541,8 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
 
                   {/* Preferred Name */}
                   <CompareRow
-                    field="Preferred Name"
-                    dbValue={
-                      activeRequest.vipGuest?.preferredName ??
-                      activeRequest.vipGuest?.fullName ??
-                      ""
-                    }
+                    field="Name"
+                    dbValue={activeRequest.vipGuest?.fullName ?? ""}
                     inputValue={activeRequest.inputPreferredName ?? ""}
                   />
 
@@ -577,15 +573,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                     />
                     <Row
                       label="Channel ID"
-                      value={activeRequest.channelIdentifier ?? "—"}
-                    />
-                    <Row
-                      label="Nickname"
-                      value={
-                        activeRequest.nicknameFromChannel ??
-                        activeRequest.inputPreferredName ??
-                        "—"
-                      }
+                      value={activeRequest.inputChannelIdentifier ?? "—"}
                     />
                     <Row
                       label="Preferred Name (input)"
@@ -609,11 +597,6 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                       value={
                         activeRequest.vipGuest?.statusLabel ?? "Not Checked In"
                       }
-                      alignRight
-                    />
-                    <Row
-                      label="Member Tier"
-                      value={activeRequest.vipGuest?.tier ?? "—"}
                       alignRight
                     />
                     <Row

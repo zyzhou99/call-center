@@ -8,6 +8,9 @@ interface RouteParams {
   params: { id: string };
 }
 
+// 1 分鐘超時（毫秒）
+const TIMEOUT_MS = 60 * 1000;
+
 // 映射成前端 ChatPanel / inbox 用的 Message 結構
 function mapDbMessageToUi(m: any, sessionId: string) {
   const ts =
@@ -62,6 +65,75 @@ export async function GET(req: NextRequest, { params }: RouteParams) {
       orderBy: { sendTime: "asc" },
       take,
     });
+
+    // ⭐ 這裡加「1 分鐘未回覆自動回復」
+    if (messages.length > 0) {
+      const now = new Date();
+
+      // 找最後一條「客人」消息（direction = "in"）
+      let lastGuestMsg: any | null = null;
+      for (const m of messages) {
+        if (m.direction === "in") {
+          lastGuestMsg = m;
+        }
+      }
+
+      if (
+        lastGuestMsg &&
+        lastGuestMsg.sendTime instanceof Date
+      ) {
+        const lastTs = lastGuestMsg.sendTime.getTime();
+
+        // 是否已經有任何客服 / 系統回覆在這之後
+        const hasReplyAfter = messages.some(
+          (m: any) =>
+            m.sendTime instanceof Date &&
+            m.sendTime.getTime() > lastTs &&
+            m.direction === "out"
+        );
+
+        const diff = now.getTime() - lastTs;
+
+        // 沒有任何 out 消息接上，且已經超過 1 分鐘 => 發超時自動回覆
+        if (!hasReplyAfter && diff >= TIMEOUT_MS) {
+          const autoText =
+            "尊敬的贵宾，当前正值服务高峰，请您稍等片刻，我们将尽快为您服务。";
+
+          const autoMsg = await prisma.message.create({
+            data: {
+              msgId: `h5-timeout-${sessionId}-${now.getTime()}`,
+              openKfid: session.openKfid,
+              externalUserId: session.externalUserId,
+              origin: "system",
+              msgType: "text",
+              sendTime: now,
+              payload: JSON.stringify({
+                type: "h5_timeout_auto_reply",
+                relatedTo: lastGuestMsg.id,
+                text: autoText,
+              }),
+              direction: "out",
+              text: autoText,
+              hasSensitive: false,
+              sensitiveHits: null,
+              sessionId: session.id,
+            },
+          });
+
+          // 更新會話的最後消息時間與預覽，但不動 unreadCount
+          await prisma.session.update({
+            where: { id: session.id },
+            data: {
+              lastMsgAt: now,
+              lastMsgPreview: autoText,
+            },
+          });
+
+          // 把自動回復追加到本次返回的消息列表
+          messages.push(autoMsg);
+        }
+      }
+    }
 
     const payload = messages.map((m) => mapDbMessageToUi(m, sessionId));
 

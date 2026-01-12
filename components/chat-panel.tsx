@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Conversation, Message } from "@/types";
-import { Phone, Smile, Paperclip, Mic, Send } from "lucide-react";
+import { Phone, Smile, Paperclip, Mic, Send, ChevronDown} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/language-context";
 
@@ -18,6 +18,9 @@ export function ChatPanel({
   onSendMessage,
 }: ChatPanelProps) {
   const [messageText, setMessageText] = useState("");
+  const [status, setStatus] = useState<"open" | "resolved">("open");
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const statusText = status === "open" ? "打开" : "已解决";
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { t } = useLanguage();
 
@@ -93,12 +96,58 @@ export function ChatPanel({
           </div>
         </div>
 
-        <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-          <Phone
-            className="w-5 h-5"
-            style={{ color: "var(--text-primary)" }}
-          />
-        </button>
+        {/* 右側：狀態下拉 + 電話按鈕 */}
+        <div className="flex items-center space-x-3 relative">
+          {/* 狀態按鈕 + 下拉菜單 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowStatusMenu((v) => !v)}
+              className="px-4 py-2 rounded-full border text-sm flex items-center gap-1 hover:bg-[#f7f5f2]"
+              style={{
+                borderColor: "var(--divider)",
+                color: "var(--text-primary)",
+                backgroundColor: "#ffffff",
+              }}
+            >
+              <span>{statusText}</span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+
+            {showStatusMenu && (
+              <div className="absolute right-0 mt-2 w-24 bg-white rounded-xl shadow-lg border text-sm py-1 z-10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus("open");
+                    setShowStatusMenu(false);
+                  }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#f7f5f2]"
+                >
+                  打开
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus("resolved");
+                    setShowStatusMenu(false);
+                  }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#f7f5f2]"
+                >
+                  已解决
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 電話按鈕（原樣保留，只是向右挪一點） */}
+          <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
+            <Phone
+              className="w-5 h-5"
+              style={{ color: "var(--text-primary)" }}
+            />
+          </button>
+        </div>
       </div>
 
       {/* 中间内容：根据 channel 切换 UI */}

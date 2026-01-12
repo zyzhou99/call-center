@@ -47,6 +47,10 @@ export default function VipPendingPage() {
   const [status, setStatus] = useState<PendingStatus>("INIT");
   const [message, setMessage] = useState<string>("");
   const [reason, setReason] = useState<string | null>(null);
+  // ⭐ 新增：保存最新的 approval，方便手動跳轉時使用
+  const [approval, setApproval] = useState<
+    ApprovalResponse["approval"] | null
+  >(null);
 
   // 回到 /vip-access 前，順手清掉 localStorage
   function clearPendingLocalState() {
@@ -58,6 +62,32 @@ export default function VipPendingPage() {
   function handleBackToAccess() {
     clearPendingLocalState();
     router.push("/vip-access");
+  }
+
+  // ⭐ 新增：手動進入對話的兜底按鈕
+  function handleEnterChat() {
+    if (!approval) return;
+
+    // CASE 1：WeCom / hybrid，後端給了企業微信客服鏈接
+    if (approval.kfUrl) {
+      if (typeof window !== "undefined") {
+        window.location.href = approval.kfUrl;
+      }
+      return;
+    }
+
+    // CASE 2：H5 webchat，後端給了 sessionId
+    if (approval.sessionId) {
+      if (typeof window !== "undefined") {
+        window.location.href = `/vip-chat?sessionId=${encodeURIComponent(
+          approval.sessionId
+        )}`;
+      }
+      return;
+    }
+
+    // 都沒有的極端情況：兜底回到 vip-access
+    handleBackToAccess();
   }
 
   useEffect(() => {
@@ -100,8 +130,11 @@ export default function VipPendingPage() {
           return;
         }
 
-        const approval = data.approval;
-        const s = approval.status;
+        const approvalFromApi = data.approval;
+        // ⭐ 每次成功拿到 approval，都更新到 state 裡，給手動按鈕用
+        setApproval(approvalFromApi);
+
+        const s = approvalFromApi.status;
 
         if (s === "PENDING") {
           setStatus("PENDING");
@@ -132,7 +165,7 @@ export default function VipPendingPage() {
           setReason(null);
 
           // ✅ CASE 1：企業微信客服鏈路（WeCom hybrid）
-          if (approval.kfUrl) {
+          if (approvalFromApi.kfUrl) {
             stopped = true;
             if (timer) clearInterval(timer);
 
@@ -144,12 +177,12 @@ export default function VipPendingPage() {
               window.sessionStorage.setItem(redirectKey, "1");
             }
 
-            window.location.href = approval.kfUrl;
+            window.location.href = approvalFromApi.kfUrl;
             return;
           }
 
           // ✅ CASE 2：H5 webchat 鏈路（/vip-chat）
-          if (approval.sessionId) {
+          if (approvalFromApi.sessionId) {
             stopped = true;
             if (timer) clearInterval(timer);
 
@@ -161,7 +194,7 @@ export default function VipPendingPage() {
             }
 
             window.location.href = `/vip-chat?sessionId=${encodeURIComponent(
-              approval.sessionId
+              approvalFromApi.sessionId
             )}`;
             return;
           }
@@ -180,7 +213,7 @@ export default function VipPendingPage() {
           setMessage(
             "We are unable to complete your request via this channel."
           );
-          setReason(approval.reason || null);
+          setReason(approvalFromApi.reason || null);
           return;
         }
 
@@ -222,6 +255,11 @@ export default function VipPendingPage() {
     status === "ERROR" ||
     status === "REJECTED" ||
     status === "EXPIRED";
+
+  const canManualEnterChat =
+    status === "APPROVED" &&
+    !!approval &&
+    (!!approval.kfUrl || !!approval.sessionId);
 
   return (
     <div className="min-h-screen bg-[#fbf3e7] flex justify-center">
@@ -270,6 +308,22 @@ export default function VipPendingPage() {
               <p className="text-[11px] text-center text-[#9a7a55] px-4 mt-1">
                 {reason}
               </p>
+            )}
+
+            {/* ⭐ 新增：審批通過但自動跳轉有問題時，給一個手動入口 */}
+            {canManualEnterChat && (
+              <button
+                type="button"
+                onClick={handleEnterChat}
+                className="mt-4 px-6 py-2 rounded-full text-[12px] font-semibold tracking-[0.18em] uppercase"
+                style={{
+                  background:
+                    "linear-gradient(91deg, #F3DBAB 3.63%, #D6BB87 100%)",
+                  color: "#3a3023",
+                }}
+              >
+                Enter Concierge Chat
+              </button>
             )}
           </div>
 
