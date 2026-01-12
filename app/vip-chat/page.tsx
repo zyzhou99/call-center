@@ -45,6 +45,16 @@ export default function VipChatPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const warningTimerRef = useRef<any>(null);
 
+  // ⭐ 進入 vip-chat 時，把本次會話的 sessionId 記到 localStorage
+  useEffect(() => {
+    if (!sessionId || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem("vip_last_session_id", sessionId);
+    } catch (e) {
+      console.error("Failed to save vip_last_session_id:", e);
+    }
+  }, [sessionId]);
+
   // 從 H5 接口拉消息 + 輪詢
   useEffect(() => {
     if (!sessionId) return;

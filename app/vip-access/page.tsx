@@ -149,11 +149,23 @@ export default function VipAccessPage() {
     }
   }, [version]);
 
-  // 頁面載入時檢查 10 分鐘內是否有 pending 記錄，有的話直接跳到 /vip-pending
+  // 頁面載入時：
+  // 1) 先看本地是否有上一個 H5 會話的 sessionId，有就直接進入 /vip-chat
+  // 2) 沒有的話，再走原來 10 分鐘內 pending → /vip-pending 的邏輯
   useEffect(() => {
     if (typeof window === "undefined") return;
 
     try {
+      // ⭐ 方案一：前端記住最近一次的 H5 會話
+      const lastSessionId = window.localStorage.getItem("vip_last_session_id");
+      if (lastSessionId) {
+        router.replace(
+          `/vip-chat?sessionId=${encodeURIComponent(lastSessionId)}`
+        );
+        return;
+      }
+
+      // 保留原來的 pending 邏輯
       const raw = window.localStorage.getItem("vip_access_last_pending");
       if (!raw) return;
 
@@ -170,7 +182,7 @@ export default function VipAccessPage() {
         `/vip-pending?pendingId=${encodeURIComponent(saved.pendingId)}`
       );
     } catch (e) {
-      console.error("Failed to auto-redirect from saved pending", e);
+      console.error("Failed to auto-redirect from saved state", e);
     }
   }, [router]);
 
