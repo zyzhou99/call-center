@@ -4,31 +4,30 @@ import { prisma } from "@/lib/db";
 
 export const runtime = "nodejs";
 
-// 和 /api/vip/approvals/[id] 裡用來創建 H5 Session 的 openKfId 保持一致
-const H5_OPENKFID = "H5_WEBCHAT_DEMO";
+// ✅ 和 /api/vip/entry、/api/vip/approvals/[id] 使用同一個 H5 openKfId
+const H5_OPENKFID =
+  process.env.NEXT_PUBLIC_H5_OPENKFID || "H5_WEBCHAT";
 
 export async function GET() {
   try {
     const sessions = await prisma.session.findMany({
       where: {
-        channel: "webchat",         // 只拉 H5 / webchat 渠道的會話
-        openKfid: H5_OPENKFID,      // 再限定在我們 H5 用的那個 openKfId
+        openKfid: H5_OPENKFID,
+        // ✅ 同時包含瀏覽器 H5（webchat）和微信內 H5（wechat）
+        channel: { in: ["webchat", "wechat"] },
       },
       include: {
         vipGuest: true,
       },
       orderBy: [
-        {
-          lastMsgAt: "desc",
-        },
-        {
-          createdAt: "desc",
-        },
+        { lastMsgAt: "desc" },
+        { createdAt: "desc" },
       ],
     });
 
     const payload = sessions.map((s) => ({
       id: s.id,
+      // ✅ 把真實的 channel 帶給前端：可能是 "webchat" 也可能是 "wechat"
       channel: s.channel,
       displayName:
         s.displayName ||
@@ -49,24 +48,21 @@ export async function GET() {
             preferredName: s.vipGuest.preferredName,
             tier: s.vipGuest.tier,
             room: s.vipGuest.room,
+            // ✅ 把喜好/忌諱也帶給前端（你表裡已經有這兩個欄位了）
+            preference: (s.vipGuest as any).preference ?? null,
+            restriction: (s.vipGuest as any).restriction ?? null,
           }
         : null,
     }));
 
     return NextResponse.json(
-      {
-        ok: true,
-        sessions: payload,
-      },
+      { ok: true, sessions: payload },
       { status: 200 }
     );
   } catch (err) {
     console.error("Error in GET /api/h5/sessions:", err);
     return NextResponse.json(
-      {
-        ok: false,
-        error: "SERVER_ERROR",
-      },
+      { ok: false, error: "SERVER_ERROR" },
       { status: 500 }
     );
   }

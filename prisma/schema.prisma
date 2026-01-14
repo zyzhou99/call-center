@@ -36,8 +36,8 @@ model VipGuest {
   birthdayMd String?
 
   /// 行为 / 偏好 / 忌讳点（先保留你原来的命名，后面再慢慢细分也可以）
-  preference           String? // 喜好
-  restriction         String? // 不喜欢
+  preference  String? // 喜好
+  restriction String? // 不喜欢
 
   // 联系方式 & 头像（以后可以慢慢用上）
   contactPhone    String?
@@ -51,6 +51,9 @@ model VipGuest {
   checkOutDate DateTime?
   segment      String?
   statusLabel  String?
+
+  // 每个 VIP 对应的专属永久二维码（可以存 scene、token 或二维码图片 URL）
+  qrCode String? @unique
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -153,7 +156,7 @@ model PendingApproval {
   id String @id @default(cuid())
 
   // 用户输入的 VIP 号（无论对不对都会先记）
-  vipNumber  String
+  vipNumber  String?
   vipGuestId String?
   vipGuest   VipGuest? @relation(fields: [vipGuestId], references: [id])
 

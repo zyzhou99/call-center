@@ -1,20 +1,21 @@
 "use client";
 
 import { Channel } from "@/types";
-import { MessageCircle, Phone, Mail, MessageSquare } from "lucide-react";
+import { MessageCircle, Phone, Mail, MessageSquare, User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Image from "next/image";
 import wynnGold from "@/assets/wynn-gold.png";
 
 interface LeftChannelRailProps {
-  activeChannel: Channel;
-  onChannelSelect: (channel: Channel) => void;
-  // vipRequests 的 unreadCounts 里也会有一项，表示「Pending 请求数量」
-  unreadCounts: Record<Channel, number>;
+  activeChannel: Channel | "vipContacts";
+  onChannelSelect: (channel: Channel | "vipContacts") => void;
+  // 左边红点：用 string key 更灵活一点
+  unreadCounts: Record<string, number>;
 }
 
+// channel 配置：这里放宽成 string key，方便加 vipContacts
 const channelConfig: Record<
-  Channel,
+  string,
   { icon: React.ComponentType<{ className?: string }>; label: string }
 > = {
   wechat: { icon: MessageCircle, label: "WeChat" },
@@ -23,10 +24,11 @@ const channelConfig: Record<
   webchat: { icon: MessageSquare, label: "Web" },
   email: { icon: Mail, label: "Email" },
   phone: { icon: Phone, label: "Phone" },
+  vipContacts: { icon: User, label: "Contact" },
   vipRequests: { icon: MessageSquare, label: "Requests" },
 };
 
-// 上面一组渠道（和 VIP Requests 分开）
+// 上面一组渠道（和 VIP 区域分开）
 const primaryChannels: Channel[] = [
   "wechat",
   "whatsapp",
@@ -35,8 +37,6 @@ const primaryChannels: Channel[] = [
   "email",
   "phone",
 ];
-
-const vipChannel = "vipRequests" as Channel;
 
 export function LeftChannelRail({
   activeChannel,
@@ -61,24 +61,34 @@ export function LeftChannelRail({
                 label={config.label}
                 isActive={activeChannel === channel}
                 onClick={() => onChannelSelect(channel)}
-                unreadCount={unreadCounts[channel]}
+                unreadCount={unreadCounts[channel] || 0}
               />
             </div>
           );
         })}
 
-        {/* 分隔线，把 VIP Requests 和上面按钮隔开 */}
+        {/* 分隔线，把 VIP 区域和上面按钮隔开 */}
         <div className="my-4 h-px w-9 bg-white rounded-full" />
 
-        {/* 下面：VIP Requests 按钮（小红点 = pending 数量） */}
-        <div className="w-full">
+        {/* 下面：VIP Requests + VIP Contacts 两个按钮 */}
+        <div className="w-full space-y-2">
+          {/* VIP Contacts */}
           <ChannelIconButton
-            icon={channelConfig[vipChannel].icon}
-            label={channelConfig[vipChannel].label}
-            isActive={activeChannel === vipChannel}
-            onClick={() => onChannelSelect(vipChannel)}
-            // 这里期望 unreadCounts.vipRequests = pending 的数量
-            unreadCount={unreadCounts[vipChannel]}
+            icon={channelConfig.vipContacts.icon}
+            label={channelConfig.vipContacts.label}
+            // 这里用 String(...) 避免 TS 抱怨类型不重合
+            isActive={String(activeChannel) === "vipContacts"}
+            onClick={() => onChannelSelect("vipContacts")}
+            unreadCount={unreadCounts.vipContacts || 0}
+          />
+
+          {/* VIP Requests */}
+          <ChannelIconButton
+            icon={channelConfig.vipRequests.icon}
+            label={channelConfig.vipRequests.label}
+            isActive={activeChannel === "vipRequests"}
+            onClick={() => onChannelSelect("vipRequests")}
+            unreadCount={unreadCounts.vipRequests || 0}
           />
         </div>
       </div>
@@ -121,7 +131,7 @@ function ChannelIconButton({
           : {}
       }
     >
-      {/* 小红点：>0 就显示（VIP Requests 就是 pending count） */}
+      {/* 小红点：>0 就显示 */}
       {showBadge && (
         <span className="absolute top-1.5 right-1.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-medium">
           {unreadCount > 9 ? "9" : unreadCount}

@@ -1,3 +1,9 @@
+// ⚠️ LEGACY FLOW: VIP 自助驗證入口（輸入 VIP 卡號 + 生日）
+// 現在需求已改為「每位 VIP 對應一個永久專屬二維碼」，
+// 未來會用新的 /vip-entry H5 頁面取代這個表單。
+// 目前暫時保留，以免影響已有測試鏈路，但新功能不要再往這裡加。
+
+
 "use client";
 
 import { useState, useEffect, FormEvent, useMemo } from "react";

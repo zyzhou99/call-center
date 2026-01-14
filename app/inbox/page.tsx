@@ -17,6 +17,8 @@ import { Channel, Message, Conversation } from "@/types";
 import type { GuestProfile } from "@/types";
 import { getLastMessageTimestamp } from "@/lib/conversation-utils";
 import { VipRequestsView } from "@/components/inbox/vip-requests-view";
+import { VipListView } from "@/components/inbox/vip-list-view";
+import { cn } from "@/lib/utils";
 
 type VipRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
 
@@ -68,6 +70,9 @@ function InboxContent() {
 
   // 真实 H5 / webchat 会话（瀏覽器掃碼的 H5）
   const [h5Conversations, setH5Conversations] = useState<Conversation[]>([]);
+
+  // 真实 H5 via WeChat 会话（微信內打開但走本地 H5 模式）
+  const [h5WeChatConversations, setH5WeChatConversations] = useState<Conversation[]>([]);
 
   // 所有 channel 的消息（wechat + webchat + mock）
   const [messagesState, setMessagesState] =
@@ -347,13 +352,17 @@ function InboxContent() {
           ...h5UnreadBaseRef.current,
         };
 
-        const convList: Conversation[] = rawList.map((s: any) => {
+        // 拆成兩份：webchat 用於 WebChat tab，wechat(H5) 用於 WeChat tab
+        const webchatConvs: Conversation[] = [];
+        const wechatH5Convs: Conversation[] = [];
+
+        rawList.forEach((s: any) => {
           const id = s.id as string;
           const rawUnread = Number(s.unreadCount || 0);
           serverUnreads[id] = rawUnread;
 
           if (!(id in base)) {
-            // H5 webchat 原來就是以 server 未讀作為基線（第一次不亮點）
+            // 第一次看到這個 H5 會話，用 server 未讀作為基線（第一次不亮紅點）
             base[id] = rawUnread;
           }
 
@@ -366,13 +375,18 @@ function InboxContent() {
           const baseUnread = base[id] || 0;
           let effectiveUnread = Math.max(0, rawUnread - baseUnread);
 
-          if (activeChannel === "webchat" && id === activeConversationId) {
+          // 後端帶回的 channel: "wechat" 或 "webchat"
+          const ch: Channel =
+            s.channel === "wechat" ? "wechat" : "webchat";
+
+          // 正在打開的對話，未讀顯示為 0
+          if (activeChannel === ch && id === activeConversationId) {
             effectiveUnread = 0;
           }
 
           const conv: Conversation = {
             id,
-            channel: "webchat",
+            channel: ch,
             displayName: s.displayName,
             lastMessagePreview: s.lastMsgPreview || "",
             unreadCount: effectiveUnread,
@@ -384,8 +398,13 @@ function InboxContent() {
           (conv as any).vipGuest = vipGuest;
           (conv as any).vipNumber = s.vipNumber;
           (conv as any).lastMsgAt = lastMsgAt;
+          (conv as any).isH5 = true; // ✅ 標記：這是一個 H5 來源的會話
 
-          return conv;
+          if (ch === "wechat") {
+            wechatH5Convs.push(conv);
+          } else {
+            webchatConvs.push(conv);
+          }
         });
 
         h5ServerUnreadsRef.current = serverUnreads;
@@ -402,7 +421,10 @@ function InboxContent() {
           }
         }
 
-        setH5Conversations(convList);
+        // WebChat tab 用
+        setH5Conversations(webchatConvs);
+        // WeChat tab 裡「H5 via WeChat」用
+        setH5WeChatConversations(wechatH5Convs);
       } catch (e) {
         console.error("load h5 sessions failed:", e);
       }
@@ -422,7 +444,8 @@ function InboxContent() {
     let base: Conversation[];
 
     if (activeChannel === "wechat") {
-      base = wecomConversations;
+      // ✅ 真 WeCom + H5 via WeChat 一起顯示
+      base = [...wecomConversations, ...h5WeChatConversations];
     } else if (activeChannel === "webchat") {
       base = h5Conversations;
     } else {
@@ -465,32 +488,48 @@ function InboxContent() {
       email: 0,
       phone: 0,
       vipRequests: vipPendingCount,
+      vipContacts: 0,
     };
 
+    // mock
     mockConvs.forEach((conv) => {
       if (conv.channel === "webchat") return; // webchat 用實際會話
       counts[conv.channel] += conv.unreadCount;
     });
 
+    // 真 WeCom 會話 → Wechat 累加
     wecomConversations.forEach((conv) => {
       counts.wechat += conv.unreadCount;
     });
 
+    // H5 / webchat 會話 → Webchat 累加
     h5Conversations.forEach((conv) => {
       counts.webchat += conv.unreadCount;
     });
 
+    // ✅ H5 via WeChat 會話 → Wechat 也要算！
+    h5WeChatConversations.forEach((conv) => {
+      counts.wechat += conv.unreadCount;
+    });
+
     return counts;
-  }, [mockConvs, wecomConversations, h5Conversations, vipPendingCount]);
+  }, [
+    mockConvs,
+    wecomConversations,
+    h5Conversations,
+    h5WeChatConversations, // ✅ 記得把它也放進依賴
+    vipPendingCount,
+  ]);
 
   // 全部会话（用于搜索、activeConversation）
   const allConversations: Conversation[] = useMemo(
     () => [
       ...wecomConversations,
+      ...h5WeChatConversations,
       ...h5Conversations,
       ...mockConvs.filter((c) => c.channel !== "webchat"),
     ],
-    [wecomConversations, h5Conversations, mockConvs]
+    [wecomConversations, h5WeChatConversations, h5Conversations, mockConvs]
   );
 
   const activeConversation =
@@ -574,11 +613,13 @@ function InboxContent() {
         conv.id;
 
       const isH5WeChat =
-        typeof externalUserId === "string" &&
-        externalUserId.startsWith("h5:");
+        (conv as any).isH5 === true ||
+        (typeof externalUserId === "string" &&
+          (externalUserId.startsWith("h5:") ||
+           externalUserId.startsWith("wxh5:")));
 
       if (isH5WeChat) {
-        // ⭐ H5 via WeChat：用 H5 API 拉消息
+        // ✅ H5 via WeChat：走 H5 API 拉消息
         try {
           const resp = await fetch(
             `/api/h5/sessions/${encodeURIComponent(
@@ -614,24 +655,29 @@ function InboxContent() {
             }));
           }
 
-          const serverUnreads = wecomServerUnreadsRef.current;
-          wecomUnreadBaseRef.current = {
-            ...wecomUnreadBaseRef.current,
+          // ✅ 這裡用「H5 的未讀基線」，而不是 WeCom 的
+          const serverUnreads = h5ServerUnreadsRef.current;
+          h5UnreadBaseRef.current = {
+            ...h5UnreadBaseRef.current,
             [conversationId]: serverUnreads[conversationId] || 0,
           };
 
           if (typeof window !== "undefined") {
             try {
               window.localStorage.setItem(
-                WECOM_UNREAD_BASE_STORAGE_KEY,
-                JSON.stringify(wecomUnreadBaseRef.current)
+                H5_UNREAD_BASE_STORAGE_KEY,
+                JSON.stringify(h5UnreadBaseRef.current)
               );
             } catch (e) {
-              console.error("save wecom unread base (select h5-wechat) failed:", e);
+              console.error(
+                "save h5 unread base (select h5-wechat) failed:",
+                e
+              );
             }
           }
 
-          setWecomConversations((prev) =>
+          // 把「H5 via WeChat」這條會話的 unreadCount 清零
+          setH5WeChatConversations((prev) =>
             prev.map((c) =>
               c.id === conversationId ? { ...c, unreadCount: 0 } : c
             )
@@ -640,12 +686,14 @@ function InboxContent() {
           console.error("load h5 (wechat) messages failed:", e);
         }
       } else {
-        // ⭐ 真正企業微信客服會話：走 wecom API
+        // ✅ 真 WeCom 會話：走 WeCom API + WeCom 的未讀基線
         try {
           const resp = await fetch(
             `/api/wecom/sessions/${encodeURIComponent(
               externalUserId
-            )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
+            )}/messages?open_kfid=${encodeURIComponent(
+              OPEN_KFID
+            )}&take=50`,
             { headers: { "x-admin-token": ADMIN } }
           );
           const data = await resp.json();
@@ -670,7 +718,10 @@ function InboxContent() {
                 JSON.stringify(wecomUnreadBaseRef.current)
               );
             } catch (e) {
-              console.error("save wecom unread base (select wecom) failed:", e);
+              console.error(
+                "save wecom unread base (select wecom) failed:",
+                e
+              );
             }
           }
 
@@ -684,37 +735,33 @@ function InboxContent() {
         }
       }
 
-      // ⭐ 先用 Session 自帶的 vipGuest 填右側 Profile（確保能顯示 preferredName）
+      // ⭐ 先用會話自帶的 vipGuest 做一個「快速」Profile（先顯示名字）
       const vipGuest = (conv as any).vipGuest;
-
       if (vipGuest) {
         const profileFromSession: GuestProfile = {
           ...(vipGuest as any),
-          // GuestProfile 里用的是 name，從 preferredName / fullName 映射過來
           name:
             (vipGuest.preferredName as string) ||
             (vipGuest.fullName as string) ||
             (conv.displayName as string) ||
             "",
         };
-
         setActiveProfile(profileFromSession);
       } else {
-        // 如果這個會話上暫時沒有 vipGuest，就先清空，
-        // 然後再嘗試走後端兜底查一次（避免完全沒有資料）
         setActiveProfile(null);
+      }
 
-        try {
-          const resp = await fetch(
-            `/api/vip/profile/${encodeURIComponent(conversationId)}`
-          );
-          const data = await resp.json();
-          if (data?.ok && data.profile) {
-            setActiveProfile(data.profile as GuestProfile);
-          }
-        } catch (e) {
-          console.error("load VIP profile (fallback) failed:", e);
+      // ⭐ 再調一次後端 Profile，拿到完整的 preference / restriction 等欄位
+      try {
+        const resp = await fetch(
+          `/api/vip/profile/${encodeURIComponent(conversationId)}`
+        );
+        const data = await resp.json();
+        if (data?.ok && data.profile) {
+          setActiveProfile(data.profile as GuestProfile);
         }
+      } catch (e) {
+        console.error("load VIP profile (wechat) failed:", e);
       }
 
       return;
@@ -853,8 +900,10 @@ function InboxContent() {
       conv.id;
 
     const isH5WeChat =
-      typeof externalUserId === "string" &&
-      externalUserId.startsWith("h5:");
+      (conv as any).isH5 === true ||
+      (typeof externalUserId === "string" &&
+        (externalUserId.startsWith("h5:") ||
+         externalUserId.startsWith("wxh5:")));
 
     let stopped = false;
 
@@ -1001,8 +1050,10 @@ function InboxContent() {
         conv.id;
 
       const isH5WeChat =
-        typeof externalUserId === "string" &&
-        externalUserId.startsWith("h5:");
+        (conv as any).isH5 === true ||
+        (typeof externalUserId === "string" &&
+          (externalUserId.startsWith("h5:") ||
+           externalUserId.startsWith("wxh5:")));
 
       if (isH5WeChat) {
         // ⭐ H5 via WeChat：走 H5 發送，讓 /vip-chat 也能看到
@@ -1094,13 +1145,15 @@ function InboxContent() {
       {/* 右側主區域：上面是 Header，下面根據 channel 切換內容 */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <AppHeader />
-
-        <div className="flex-1 flex overflow-hidden">
+          <div className="flex-1 flex overflow-hidden">
           {activeChannel === "vipRequests" ? (
-            // 👉 VIP Requests 審批視圖
+            // 左侧选中「VIP Requests」：走审批视图
             <VipRequestsView onPendingCountChange={setVipPendingCount} />
+          ) : activeChannel === "vipContacts" ? (
+            // 左侧选中「VIP Contacts」：走 VIP 通讯录视图
+            <VipListView />
           ) : (
-            // 👉 普通渠道：會話列表 + 聊天 + Profile
+            // 其它渠道：会话列表 + 聊天 + Profile
             <>
               <ConversationListPanel
                 conversations={visibleConversations}
