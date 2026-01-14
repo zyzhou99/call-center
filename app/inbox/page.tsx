@@ -476,7 +476,7 @@ function InboxContent() {
 
       return bTimestamp - aTimestamp;
     });
-  }, [activeChannel, wecomConversations, h5Conversations, mockConvs, messagesState]);
+  }, [activeChannel, wecomConversations, h5WeChatConversations, h5Conversations, mockConvs, messagesState]);
 
   // 左侧栏未读数（包含 vipRequests + webchat）
   const unreadCounts = useMemo(() => {
@@ -493,7 +493,11 @@ function InboxContent() {
 
     // mock
     mockConvs.forEach((conv) => {
-      if (conv.channel === "webchat") return; // webchat 用實際會話
+      // ❌ webchat 用實際會話，不算 mock
+      if (conv.channel === "webchat") return;
+      // ❌ wechat 現在也走實際會話，不要再用 mock 的未讀來干擾左側紅點
+      if (conv.channel === "wechat") return;
+
       counts[conv.channel] += conv.unreadCount;
     });
 
@@ -675,6 +679,34 @@ function InboxContent() {
               );
             }
           }
+
+          // ⭐ 新增：同步把 WeCom 那邊的未讀基線也設成「當前值」
+          const wecomServerUnreads = wecomServerUnreadsRef.current;
+          wecomUnreadBaseRef.current = {
+            ...wecomUnreadBaseRef.current,
+            [conversationId]: wecomServerUnreads[conversationId] || 0,
+          };
+
+          if (typeof window !== "undefined") {
+            try {
+              window.localStorage.setItem(
+                WECOM_UNREAD_BASE_STORAGE_KEY,
+                JSON.stringify(wecomUnreadBaseRef.current)
+              );
+            } catch (e) {
+              console.error(
+                "save wecom unread base (select h5-wechat) failed:",
+                e
+              );
+            }
+          }
+
+          // ⭐ 新增：把 wecomConversations 裡這條會話的未讀也清零
+          setWecomConversations((prev) =>
+            prev.map((c) =>
+              c.id === conversationId ? { ...c, unreadCount: 0 } : c
+            )
+          );
 
           // 把「H5 via WeChat」這條會話的 unreadCount 清零
           setH5WeChatConversations((prev) =>
