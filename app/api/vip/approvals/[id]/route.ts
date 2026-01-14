@@ -319,6 +319,28 @@ export async function POST(req: Request, { params }: RouteParams) {
       }
     }
 
+        // --------- 把這次審批填的備註，同步寫到 VipGuest.notes ---------
+    // （只在 APPROVED 分支裡，REJECT 不會寫入 VIP）
+    if (vipGuestIdToUse && reason) {
+      try {
+        await prisma.vipGuest.update({
+          where: { id: vipGuestIdToUse },
+          data: { remark: reason },
+        });
+
+        console.log("[vipApproval] synced remark into vipGuest.remark", {
+          vipGuestId: vipGuestIdToUse,
+          remark: reason,
+        });
+      } catch (e) {
+        console.error(
+          "[vipApproval] failed to sync remark into vipGuest.remark",
+          e
+        );
+      }
+    }
+
+
     // --------- 情況二：APPROVED，要為 H5 / WeCom 做不同處理 ---------
 
     // 先沿用 DB 裡已有的值（理論上大多數情況都是 null）

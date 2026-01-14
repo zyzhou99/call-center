@@ -52,6 +52,8 @@ model VipGuest {
   segment      String?
   statusLabel  String?
 
+  remark       String?
+
   // 每个 VIP 对应的专属永久二维码（可以存 scene、token 或二维码图片 URL）
   qrCode String? @unique
 
