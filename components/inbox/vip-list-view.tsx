@@ -21,7 +21,7 @@ type VipContact = {
   birthdayMd?: string;
   preference?: string;
   restriction?: string;
-  qrCode?: string; // ✅ 新增：专属 qrCode token
+  qrCode?: string; // ✅ 专属 qrCode token
 };
 
 type VipForm = {
@@ -35,6 +35,7 @@ type VipForm = {
   birthdayMd: string;
   preference: string;
   restriction: string;
+  note: string; // ✅ 新增：内部备注（映射到 vipGuest.remark）
   isNew: boolean; // 新建还未保存到 DB
 };
 
@@ -141,6 +142,7 @@ export function VipListView() {
           const segment = (g.segment as string | undefined) || "";
           const statusLabel = (g.statusLabel as string | undefined) || "";
 
+          const remark = (g.remark as string | undefined) || ""; // ✅ 新增：后端 remark
           const qrCode = (g.qrCode as string | undefined) || ""; // ✅ 从后端拿 qrCode
 
           return {
@@ -152,7 +154,8 @@ export function VipListView() {
             vipNumber,
             phone,
             isTemp: !vipNumber,
-            note: segment || statusLabel || undefined,
+            // ✅ note 优先用 remark，其次 fallback 到 segment/statusLabel
+            note: remark || segment || statusLabel || undefined,
 
             firstName,
             lastName,
@@ -231,6 +234,7 @@ export function VipListView() {
         birthdayMd: activeContact.birthdayMd ?? "",
         preference: activeContact.preference ?? "",
         restriction: activeContact.restriction ?? "",
+        note: activeContact.note ?? "", // ✅ 把 vipGuest.remark 同步进表单
         isNew: !!activeContact.isTemp && !activeContact.vipNumber,
       };
     });
@@ -244,6 +248,7 @@ export function VipListView() {
         c.displayName,
         c.phone,
         c.vipNumber ? `VIP ${c.vipNumber}` : "",
+        c.note || "",
       ]
         .join(" ")
         .toLowerCase();
@@ -280,6 +285,7 @@ export function VipListView() {
       birthdayMd: "",
       preference: "",
       restriction: "",
+      note: "",
       isNew: true,
     });
   };
@@ -299,10 +305,12 @@ export function VipListView() {
 
   const hasVipNumber = !!form && form.vipNumber.trim().length > 0;
 
-  const canSaveNew = isCreateMode && hasAnyName && hasVipNumber && !saving;
+  // ✅ 无论新建还是修改，都用同一套规则控制按钮可用
+  const canSave =
+    !!form && hasAnyName && hasVipNumber && !saving;
 
   const handleSave = async () => {
-    if (!form || !isCreateMode || !canSaveNew) return;
+    if (!form || !canSave) return;
 
     setSaving(true);
     setSaveError(null);
@@ -315,75 +323,161 @@ export function VipListView() {
         form.firstName ||
         form.lastName;
 
-      const res = await fetch("/api/vip/guests", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          vipNumber: form.vipNumber.trim(),
-          fullName,
-          firstName: form.firstName.trim() || null,
-          lastName: form.lastName.trim() || null,
-          preferredName: form.preferredName.trim() || null,
-          birthdayMd: form.birthdayMd.trim() || null,
-          contactPhone: form.contactPhone.trim() || null,
-          contactEmail: form.contactEmail.trim() || null,
-          preference: form.preference.trim() || "",
-          restriction: form.restriction.trim() || "",
-        }),
-      });
+      const payload = {
+        vipNumber: form.vipNumber.trim(),
+        fullName,
+        firstName: form.firstName.trim() || null,
+        lastName: form.lastName.trim() || null,
+        preferredName: form.preferredName.trim() || null,
+        birthdayMd: form.birthdayMd.trim() || null,
+        contactPhone: form.contactPhone.trim() || null,
+        contactEmail: form.contactEmail.trim() || null,
+        preference: form.preference.trim() || "",
+        restriction: form.restriction.trim() || "",
+        remark: form.note.trim() || "", // ✅ 把备注写到 vipGuest.remark
+      };
 
-      const data: any = await res.json();
+      if (isCreateMode) {
+        // -------- 新建 VIP --------
+        const res = await fetch("/api/vip/guests", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
 
-      if (!res.ok || !data?.ok) {
-        throw new Error(data?.message || data?.error || "保存失败");
+        const data: any = await res.json();
+
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.message || data?.error || "保存失败");
+        }
+
+        const g = data.guest as {
+          id: string;
+          vipNumber: string;
+          fullName?: string | null;
+          preferredName?: string | null;
+          qrCode?: string | null;
+          remark?: string | null;
+        };
+
+        const newDisplayName =
+          (g.preferredName as string | undefined) ||
+          (g.fullName as string | undefined) ||
+          `VIP ${g.vipNumber}`;
+
+        const remarkFromApi =
+          (g.remark as string | undefined) ?? payload.remark;
+
+        const newContact: VipContact = {
+          id: g.id,
+          displayName: newDisplayName,
+          vipNumber: g.vipNumber,
+          phone: form.contactPhone || undefined,
+          isTemp: false,
+          firstName: form.firstName,
+          lastName: form.lastName,
+          preferredName: form.preferredName,
+          contactEmail: form.contactEmail,
+          birthdayMd: form.birthdayMd,
+          preference: form.preference,
+          restriction: form.restriction,
+          note: remarkFromApi || undefined,
+          qrCode: g.qrCode ?? undefined,
+        };
+
+        setContacts((prev) => {
+          const withoutTemp = prev.filter((c) => c.id !== form.id);
+          return [newContact, ...withoutTemp];
+        });
+
+        setActiveId(g.id);
+        setForm((prev) =>
+          prev
+            ? {
+                ...prev,
+                id: g.id,
+                isNew: false,
+                note: remarkFromApi,
+              }
+            : prev
+        );
+
+        setSaveSuccess("已更新资料并生成专属二维码。");
+      } else {
+        // -------- 修改已有 VIP --------
+        if (!form.id) {
+          throw new Error("缺少 VIP id");
+        }
+
+        const res = await fetch(
+          `/api/vip/guests/${encodeURIComponent(form.id)}`,
+          {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }
+        );
+
+        const data: any = await res.json();
+
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.message || data?.error || "更新失败");
+        }
+
+        const g = data.guest as {
+          id: string;
+          vipNumber: string;
+          fullName?: string | null;
+          preferredName?: string | null;
+          qrCode?: string | null;
+          remark?: string | null;
+        };
+
+        const newDisplayName =
+          (g.preferredName as string | undefined) ||
+          (g.fullName as string | undefined) ||
+          `VIP ${g.vipNumber}`;
+
+        const remarkFromApi =
+          (g.remark as string | undefined) ?? payload.remark;
+
+        setContacts((prev) =>
+          prev.map((c) =>
+            c.id === form.id
+              ? {
+                  ...c,
+                  id: g.id,
+                  displayName: newDisplayName,
+                  vipNumber: g.vipNumber,
+                  phone: form.contactPhone || undefined,
+                  firstName: form.firstName,
+                  lastName: form.lastName,
+                  preferredName: form.preferredName,
+                  contactEmail: form.contactEmail,
+                  birthdayMd: form.birthdayMd,
+                  preference: form.preference,
+                  restriction: form.restriction,
+                  note: remarkFromApi || undefined,
+                  qrCode: g.qrCode ?? c.qrCode,
+                }
+              : c
+          )
+        );
+
+        setActiveId(g.id);
+        setForm((prev) =>
+          prev
+            ? {
+                ...prev,
+                id: g.id,
+                isNew: false,
+                note: remarkFromApi,
+              }
+            : prev
+        );
+
+        setSaveSuccess("已更新 VIP 资料。");
       }
-
-      const g = data.guest as {
-        id: string;
-        vipNumber: string;
-        fullName?: string | null;
-        preferredName?: string | null;
-        qrCode?: string | null;
-      };
-
-      const newDisplayName =
-        (g.preferredName as string | undefined) ||
-        (g.fullName as string | undefined) ||
-        `VIP ${g.vipNumber}`;
-
-      const newContact: VipContact = {
-        id: g.id,
-        displayName: newDisplayName,
-        vipNumber: g.vipNumber,
-        phone: form.contactPhone || undefined,
-        isTemp: false,
-        firstName: form.firstName,
-        lastName: form.lastName,
-        preferredName: form.preferredName,
-        contactEmail: form.contactEmail,
-        birthdayMd: form.birthdayMd,
-        preference: form.preference,
-        restriction: form.restriction,
-        qrCode: g.qrCode ?? undefined, // ✅ 把后端生成的 qrCode 也放进来
-      };
-
-      setContacts((prev) => {
-        const withoutTemp = prev.filter((c) => c.id !== form.id);
-        return [newContact, ...withoutTemp];
-      });
-
-      setActiveId(g.id);
-      setForm((prev) =>
-        prev
-          ? {
-              ...prev,
-              id: g.id,
-              isNew: false,
-            }
-          : prev
-      );
-
-      setSaveSuccess("已更新资料并生成专属二维码。");
     } catch (e: any) {
       console.error("save vip failed:", e);
       setSaveError(e?.message || "保存失败，请稍后重试。");
@@ -593,7 +687,7 @@ export function VipListView() {
                   >
                     {isCreateMode
                       ? "新建 VIP 客户 · 填写资料后点击更新即可写入档案并生成二维码"
-                      : "来自 VIP 档案 · 可在此查看喜好与基本信息"}
+                      : "来自 VIP 档案 · 可在此查看与更新喜好、备注和基本信息"}
                   </div>
                 </div>
               </div>
@@ -832,6 +926,20 @@ export function VipListView() {
                         placeholder="0323"
                       />
                     </Field>
+
+                    {/* ✅ 新增：备注字段（映射 vipGuest.remark） */}
+                    <div className="col-span-2">
+                      <Field label="备注（内部可见，仅员工查看）">
+                        <textarea
+                          value={form.note}
+                          onChange={(e) =>
+                            updateForm("note", e.target.value)
+                          }
+                          className={cn(inputClass, "min-h-[72px]")}
+                          placeholder="例如：喜欢被称呼为豆总；不喜欢太吵的环境；对花粉过敏等。"
+                        />
+                      </Field>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -861,7 +969,7 @@ export function VipListView() {
                   <div className="flex items-center gap-4">
                     <button
                       type="button"
-                      disabled={!canSaveNew}
+                      disabled={!canSave}
                       onClick={handleSave}
                       className={cn(
                         "px-6 py-2.5 rounded-full text-[13px] font-medium text-white disabled:opacity-60 disabled:cursor-not-allowed"
@@ -888,13 +996,19 @@ export function VipListView() {
                         请填写 VIP number。
                       </span>
                     )}
-                    {!isCreateMode && (
+                    {isCreateMode ? (
                       <span
                         className="text-[11px]"
                         style={{ color: "#9B8773" }}
                       >
-                        目前仅支持「新建联系人」点击“更新资料”后写入数据库；已有
-                        VIP 的修改我们下一步再接更新接口。
+                        新建联系人：填写必填项后点击「更新资料」，会写入档案并生成专属二维码。
+                      </span>
+                    ) : (
+                      <span
+                        className="text-[11px]"
+                        style={{ color: "#9B8773" }}
+                      >
+                        已有 VIP：在此修改后的姓名、备注、喜好等会用于后续对话右侧的 VIP Profile 展示。
                       </span>
                     )}
                   </div>
@@ -1052,7 +1166,12 @@ function VipContactRow({ contact, isActive, onClick }: VipContactRowProps) {
             className="text-sm truncate"
             style={{ color: "var(--text-secondary)" }}
           >
-            {contact.phone ? maskPhone(contact.phone) : "未填写手机号"}
+            {/* ✅ 优先展示备注，没有备注再显示手机号 */}
+            {contact.note
+              ? contact.note
+              : contact.phone
+              ? maskPhone(contact.phone)
+              : "未填写手机号"}
           </p>
         </div>
       </div>
