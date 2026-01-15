@@ -37,7 +37,9 @@ export interface GuestProfile {
   preferredName: string;
   vipNumber: string;
   notes: string;
-  remark: string;
+  remark?: string;
+  preference?: string;
+  restriction?: string;
 }
 
 export interface User {
