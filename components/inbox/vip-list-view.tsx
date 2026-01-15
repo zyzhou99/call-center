@@ -84,11 +84,27 @@ export function VipListView() {
   );
   const [mergeSelection, setMergeSelection] = useState<string[]>([]);
 
+  // ✅ 手机端 UI 状态（不影响 PC）
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileView, setMobileView] = useState<"list" | "detail">("list");
+  const [mobileRightPanelOpen, setMobileRightPanelOpen] = useState(false);
+
   // 拿到当前站点地址，比如 http://localhost:3000 或 https://yl.mo-happy-go.top
   useEffect(() => {
     if (typeof window !== "undefined") {
       setOrigin(window.location.origin);
     }
+  }, []);
+
+  // 监听窗口宽度，区分手机 / PC，仅用于 UI
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   // 🔄 拉取 DB 里的 VipGuest 列表
@@ -162,7 +178,7 @@ export function VipListView() {
           const segment = (g.segment as string | undefined) || "";
           const statusLabel = (g.statusLabel as string | undefined) || "";
 
-          const remarkFromDb = (((g.remark as string | undefined) ?? "").trim());
+          const remarkFromDb = ((g.remark as string | undefined) ?? "").trim();
 
           const qrCode = (g.qrCode as string | undefined) || ""; // ✅ 从后端拿 qrCode
 
@@ -367,6 +383,10 @@ export function VipListView() {
       remark: "",
       isNew: true,
     });
+
+    if (isMobile) {
+      setMobileView("detail");
+    }
   };
 
   const updateForm = <K extends keyof VipForm>(key: K, value: VipForm[K]) => {
@@ -385,8 +405,7 @@ export function VipListView() {
   const hasVipNumber = !!form && form.vipNumber.trim().length > 0;
 
   // ✅ 无论新建还是修改，都用同一套规则控制按钮可用
-  const canSave =
-    !!form && hasAnyName && hasVipNumber && !saving;
+  const canSave = !!form && hasAnyName && hasVipNumber && !saving;
 
   const handleSave = async () => {
     if (!form || !canSave) return;
@@ -605,14 +624,14 @@ export function VipListView() {
 
   return (
     <div
-      className="flex flex-1 overflow-hidden"
+      className="flex flex-1 overflow-hidden min-h-0"
       style={{ backgroundColor: "#F9F8F6" }}
     >
       {origin && (
         <GenericQrModal
           open={showGenericQr}
           onClose={() => setShowGenericQr(false)}
-          entryUrl={`${origin}/vip-request`} // 这里用你现在通用码真正指向的 URL
+          entryUrl={`${origin}/vip-request`}
         />
       )}
       {entryUrl && (
@@ -622,12 +641,20 @@ export function VipListView() {
           entryUrl={entryUrl}
         />
       )}
-      {/* 左侧列表：宽度和 Inbox 的 ConversationListPanel 对齐 */}
+
+      {/* 左侧列表：PC 固定 96，手机 list 模式全宽 */}
       <div
-        className="w-96 flex flex-col relative z-10"
+        className={cn(
+          "flex flex-col relative z-10",
+          isMobile
+            ? mobileView === "list"
+              ? "w-full"
+              : "hidden"
+            : "w-96"
+        )}
         style={{
           backgroundColor: "#F9F8F6",
-          borderRight: "1px solid var(--divider)",
+          borderRight: isMobile ? undefined : "1px solid var(--divider)",
         }}
       >
         <div
@@ -719,7 +746,12 @@ export function VipListView() {
                 key={c.id}
                 contact={c}
                 isActive={!!isActive}
-                onClick={() => setActiveId(c.id)}
+                onClick={() => {
+                  setActiveId(c.id);
+                  if (isMobile) {
+                    setMobileView("detail");
+                  }
+                }}
               />
             );
           })}
@@ -732,19 +764,37 @@ export function VipListView() {
         </div>
       </div>
 
-      {/* 中间详情区：和 ChatPanel 同一块，中间不再有 margin / 圆角 */}
+      {/* 中间详情区：PC 占剩余空间，手机 detail 模式全屏 */}
       <div
-        className="flex-1 flex flex-col"
+        className={cn(
+          "flex flex-col min-h-0",
+          isMobile
+            ? mobileView === "detail"
+              ? "flex w-full"
+              : "hidden"
+            : "flex-1"
+        )}
         style={{ backgroundColor: "#FFFFFF" }}
       >
         {activeContact && form ? (
           <>
             {/* 顶部标题条 */}
             <div
-              className="flex items-center justify-between px-8 pt-6 pb-4 border-b"
+              className="flex items-center justify-between px-4 md:px-8 pt-6 pb-4 border-b"
               style={{ borderColor: "var(--divider)" }}
             >
               <div className="flex items-center gap-4">
+                {/* 手机端返回按钮 */}
+                {isMobile && (
+                  <button
+                    type="button"
+                    onClick={() => setMobileView("list")}
+                    className="mr-1 flex h-8 w-8 items-center justify-center rounded-full border border-[#e4d4bd]"
+                  >
+                    <span className="text-lg text-[#4b3a2b]">‹</span>
+                  </button>
+                )}
+
                 <div
                   className="w-10 h-10 rounded-full flex items-center justify-center text-[13px] font-medium"
                   style={{
@@ -785,7 +835,7 @@ export function VipListView() {
                 </div>
               </div>
 
-              <button
+              {/* <button
                 className="px-4 py-2 rounded-full text-[12px]"
                 style={{
                   backgroundColor: "#FFFFFF",
@@ -794,13 +844,13 @@ export function VipListView() {
                 }}
               >
                 发送消息
-              </button>
+              </button> */}
             </div>
 
             {/* 内容 + 底部操作条 */}
-            <div className="flex-1 flex flex-col">
+            <div className="flex-1 flex flex-col min-h-0">
               {/* 滚动内容 */}
-              <div className="flex-1 overflow-y-auto px-8 py-6">
+              <div className="flex-1 overflow-y-auto px-4 md:px-8 py-6">
                 {/* 标签 + 二维码区域 */}
                 <div className="mb-6">
                   <div className="flex flex-wrap gap-2 mb-3">
@@ -892,7 +942,7 @@ export function VipListView() {
                     编辑联系人详情（备注请在右侧「备注」页签中维护）
                   </div>
 
-                  <div className="grid grid-cols-2 gap-4 text-[13px]">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-[13px]">
                     <Field label="Preferred name（称呼）（三项姓名至少填一项）">
                       <input
                         value={form.preferredName}
@@ -972,7 +1022,7 @@ export function VipListView() {
 
               {/* 底部固定操作条：删除联系人 + 更新资料 */}
               <div
-                className="px-8 py-4 border-t flex items-center justify之间"
+                className="px-4 md:px-8 py-4 border-t flex items-center justify-around"
                 style={{
                   borderColor: "var(--divider)",
                   backgroundColor: "#FFFFFF",
@@ -1010,8 +1060,7 @@ export function VipListView() {
                         className="text-[11px]"
                         style={{ color: "#B91C1C" }}
                       >
-                        请至少填写 Preferred name / First name / Last name
-                        中的一项。
+                        请至少填写姓名相关的其中一项。
                       </span>
                     )}
                     {!hasVipNumber && (
@@ -1022,7 +1071,7 @@ export function VipListView() {
                         请填写 VIP number。
                       </span>
                     )}
-                    {isCreateMode ? (
+                    {/* {isCreateMode ? (
                       <span
                         className="text-[11px]"
                         style={{ color: "#9B8773" }}
@@ -1034,9 +1083,10 @@ export function VipListView() {
                         className="text-[11px]"
                         style={{ color: "#9B8773" }}
                       >
-                        已有 VIP：在此修改后的姓名、备注、喜好等会用于后续对话右侧的 VIP Profile 展示。
+                        已有 VIP：在此修改后的姓名、备注、喜好等会用于后续对话右侧的 VIP Profile
+                        展示。
                       </span>
-                    )}
+                    )} */}
                   </div>
 
                   {saveError && (
@@ -1084,13 +1134,51 @@ export function VipListView() {
         />
       )}
 
+      {/* Mobile：右侧 panel 的遮罩层 */}
+      {isMobile && mobileRightPanelOpen && (
+        <div
+          className="fixed inset-0 z-30"
+          style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
+          onClick={() => setMobileRightPanelOpen(false)}
+        />
+      )}
+
+      {/* Mobile：悬浮入口按钮（历史记录 / 备注 / 合并） */}
+      {isMobile && activeContact && mobileView === "detail" && (
+        <button
+          type="button"
+          onClick={() => setMobileRightPanelOpen(true)}
+          className="fixed right-2 top-20 z-40 flex h-8 w-8 items-center justify-center rounded-full shadow-lg"
+          style={{ backgroundColor: "#111111" }}
+        >
+          <div className="flex flex-col items-center gap-[2px]">
+            <span className="block h-[2px] w-3 rounded-full bg-[#FDF3DE]" />
+            <span className="block h-[2px] w-4 rounded-full bg-[#FDF3DE]" />
+            <span className="block h-[2px] w-3 rounded-full bg-[#FDF3DE]" />
+          </div>
+        </button>
+      )}
+
       {/* 右侧 panel：历史记录 / 备注 / 合并 */}
       <div
-        className="w-80 flex flex-col"
-        style={{
-          borderLeft: "1px solid var(--divider)",
-          backgroundColor: "#FFFFFF",
-        }}
+        className={cn(
+          "flex flex-col bg-white transition-transform duration-300 min-h-0",
+          isMobile
+            ? "fixed inset-y-0 right-0 w-[90%] max-w-sm z-40 shadow-xl"
+            : "w-80",
+          isMobile &&
+            (mobileRightPanelOpen
+              ? "translate-x-0 pointer-events-auto"
+              : "translate-x-full pointer-events-none")
+        )}
+        style={
+          isMobile
+            ? undefined
+            : {
+                borderLeft: "1px solid var(--divider)",
+                backgroundColor: "#FFFFFF",
+              }
+        }
       >
         {/* tabs */}
         <div
@@ -1390,7 +1478,6 @@ export function VipListView() {
           )}
         </div>
       </div>
-
     </div>
   );
 }
@@ -1471,13 +1558,7 @@ function VipContactRow({ contact, isActive, onClick }: VipContactRowProps) {
 
 /* 小组件 & 工具函数 */
 
-function Field({
-  label,
-  children,
-}: {
-  label: string;
-  children: any;
-}) {
+function Field({ label, children }: { label: string; children: any }) {
   return (
     <label className="flex flex-col gap-1 text-[13px]">
       <span
@@ -1684,7 +1765,6 @@ function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
   );
 }
 
-
 interface VipQrModalProps {
   open: boolean;
   onClose: () => void;
@@ -1700,7 +1780,6 @@ function VipQrModal({ open, onClose, entryUrl }: VipQrModalProps) {
       style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
     >
       <div className="w-[360px] rounded-3xl overflow-hidden shadow-2xl">
-
         {/* 上半部分：金色卡片 */}
         <div
           className="px-6 pt-6 pb-5 text-center relative"
