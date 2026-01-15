@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import type React from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -11,7 +11,7 @@ type VipContact = {
   vipNumber?: string;
   phone?: string;
   isTemp?: boolean;
-  note?: string;
+  remark?: string;
 
   // 下面这些是从 DB 里同步出来，在中间表单用
   firstName?: string;
@@ -36,7 +36,7 @@ type VipForm = {
   birthdayMd: string;
   preference: string;
   restriction: string;
-  note: string; // ✅ 新增：内部备注（映射到 vipGuest.remark）
+  remark: string; // ✅ 新增：内部备注（映射到 vipGuest.remark）
   isNew: boolean; // 新建还未保存到 DB
 };
 
@@ -74,6 +74,10 @@ export function VipListView() {
 
   const [showGenericQr, setShowGenericQr] = useState(false);
   const [showTagModal, setShowTagModal] = useState(false); // 这个是给第 3 步用的
+
+  const [showPersonalQr, setShowPersonalQr] = useState(false); // 专属二维码弹窗
+  const [isRemarkEditing, setIsRemarkEditing] = useState(false); // 备注是否处于编辑模式
+  const remarkTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const [rightTab, setRightTab] = useState<"history" | "remark" | "merge">(
     "history"
@@ -158,7 +162,8 @@ export function VipListView() {
           const segment = (g.segment as string | undefined) || "";
           const statusLabel = (g.statusLabel as string | undefined) || "";
 
-          const remark = (g.remark as string | undefined) || ""; // ✅ 后端 remark
+          const remarkFromDb = (((g.remark as string | undefined) ?? "").trim());
+
           const qrCode = (g.qrCode as string | undefined) || ""; // ✅ 从后端拿 qrCode
 
           // ✅ 这里尝试从后端拿 sessions，如果暂时没 include，也不会报错，只是空数组
@@ -204,8 +209,8 @@ export function VipListView() {
             vipNumber,
             phone,
             isTemp: !vipNumber,
-            // ✅ note 优先用 remark，其次 fallback 到 segment/statusLabel
-            note: remark || segment || statusLabel || undefined,
+            // ✅ remark 优先用 remark，其次 fallback 到 segment/statusLabel
+            remark: remarkFromDb || segment || statusLabel || undefined,
 
             firstName,
             lastName,
@@ -273,6 +278,7 @@ export function VipListView() {
 
     setSaveError(null);
     setSaveSuccess(null);
+    setIsRemarkEditing(false); // 每次换联系人时退出编辑模式
 
     setForm((prev) => {
       // 新建这一条时，不要因为 activeId 变化把用户已经输入的内容清掉
@@ -307,7 +313,7 @@ export function VipListView() {
         birthdayMd: activeContact.birthdayMd ?? "",
         preference: activeContact.preference ?? "",
         restriction: activeContact.restriction ?? "",
-        note: activeContact.note ?? "", // ✅ 把 vipGuest.remark 同步进表单
+        remark: activeContact.remark ?? "", // ✅ 把 vipGuest.remark 同步进表单
         isNew: !!activeContact.isTemp && !activeContact.vipNumber,
       };
     });
@@ -321,7 +327,7 @@ export function VipListView() {
         c.displayName,
         c.phone,
         c.vipNumber ? `VIP ${c.vipNumber}` : "",
-        c.note || "",
+        c.remark || "",
       ]
         .join(" ")
         .toLowerCase();
@@ -341,7 +347,7 @@ export function VipListView() {
       displayName: "Guest10001",
       phone: "待补录资料",
       isTemp: true,
-      note: "待保存",
+      remark: "待保存",
     };
 
     setContacts((prev) => [newContact, ...prev]);
@@ -358,7 +364,7 @@ export function VipListView() {
       birthdayMd: "",
       preference: "",
       restriction: "",
-      note: "",
+      remark: "",
       isNew: true,
     });
   };
@@ -407,7 +413,7 @@ export function VipListView() {
         contactEmail: form.contactEmail.trim() || null,
         preference: form.preference.trim() || "",
         restriction: form.restriction.trim() || "",
-        remark: form.note.trim() || "", // ✅ 把备注写到 vipGuest.remark
+        remark: form.remark.trim() || "", // ✅ 把备注写到 vipGuest.remark
       };
 
       if (isCreateMode) {
@@ -454,7 +460,7 @@ export function VipListView() {
           birthdayMd: form.birthdayMd,
           preference: form.preference,
           restriction: form.restriction,
-          note: remarkFromApi || undefined,
+          remark: remarkFromApi || undefined,
           qrCode: g.qrCode ?? undefined,
         };
 
@@ -470,7 +476,7 @@ export function VipListView() {
                 ...prev,
                 id: g.id,
                 isNew: false,
-                note: remarkFromApi,
+                remark: remarkFromApi,
               }
             : prev
         );
@@ -530,7 +536,7 @@ export function VipListView() {
                   birthdayMd: form.birthdayMd,
                   preference: form.preference,
                   restriction: form.restriction,
-                  note: remarkFromApi || undefined,
+                  remark: remarkFromApi || undefined,
                   qrCode: g.qrCode ?? c.qrCode,
                 }
               : c
@@ -544,7 +550,7 @@ export function VipListView() {
                 ...prev,
                 id: g.id,
                 isNew: false,
-                note: remarkFromApi,
+                remark: remarkFromApi,
               }
             : prev
         );
@@ -607,6 +613,13 @@ export function VipListView() {
           open={showGenericQr}
           onClose={() => setShowGenericQr(false)}
           entryUrl={`${origin}/vip-request`} // 这里用你现在通用码真正指向的 URL
+        />
+      )}
+      {entryUrl && (
+        <VipQrModal
+          open={showPersonalQr}
+          onClose={() => setShowPersonalQr(false)}
+          entryUrl={entryUrl}
         />
       )}
       {/* 左侧列表：宽度和 Inbox 的 ConversationListPanel 对齐 */}
@@ -840,78 +853,24 @@ export function VipListView() {
                     </div>
 
                     {entryUrl ? (
-                      <div className="flex items-start gap-4">
-                        <div className="flex-1">
-                          <div
-                            className="text-[11px] mb-1"
-                            style={{ color: "var(--text-secondary)" }}
-                          >
-                            VIP 专属链接
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <code
-                              className="text-[11px] px-2 py-1 rounded border break-all"
-                              style={{
-                                backgroundColor: "#F5F5F5",
-                                borderColor: "var(--divider)",
-                                color: "var(--text-primary)",
-                              }}
-                            >
-                              {entryUrl}
-                            </code>
-                            <button
-                              type="button"
-                              className="px-3 py-1 rounded-full text-[11px]"
-                              style={{
-                                backgroundColor: "#111111",
-                                color: "#FFFFFF",
-                              }}
-                              onClick={async () => {
-                                try {
-                                  if (
-                                    typeof navigator !== "undefined" &&
-                                    navigator.clipboard?.writeText
-                                  ) {
-                                    await navigator.clipboard.writeText(
-                                      entryUrl
-                                    );
-                                    setSaveError(null);
-                                    setSaveSuccess(
-                                      "已复制专属链接，可用于生成或发送二维码。"
-                                    );
-                                  } else {
-                                    window.prompt(
-                                      "请复制以下链接：",
-                                      entryUrl
-                                    );
-                                  }
-                                } catch (e) {
-                                  console.error("copy failed:", e);
-                                  setSaveError("复制链接失败，请稍后重试。");
-                                }
-                              }}
-                            >
-                              复制链接
-                            </button>
-                          </div>
-                          <div
-                            className="mt-2 text-[11px]"
-                            style={{ color: "var(--text-secondary)" }}
-                          >
-                            可以将此链接生成二维码，供客人扫码进入专属会话。
-                          </div>
+                      <div className="flex flex-col gap-2">
+                        <div
+                          className="text-[11px]"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          已为该客人生成专属入口，可点击下方按钮查看二维码及访问链接。
                         </div>
-
-                        {/* 简单二维码预览（使用在线二维码服务，仅供 POC 测试） */}
-                        <div className="w-[96px] h-[96px] rounded-md border flex items-center justify-center overflow-hidden bg-white">
-                          <img
-                            src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                              entryUrl
-                            )}`}
-                            alt="VIP 专属二维码"
-                            className="w-full h-full object-contain"
-                          />
-                        </div>
+                        <button
+                          type="button"
+                          className="inline-flex items-center justify-center px-4 py-2 rounded-full text-[12px] font-medium"
+                          style={{
+                            backgroundColor: "#111111",
+                            color: "#FFFFFF",
+                          }}
+                          onClick={() => setShowPersonalQr(true)}
+                        >
+                          查看专属二维码
+                        </button>
                       </div>
                     ) : (
                       <div
@@ -1231,17 +1190,49 @@ export function VipListView() {
               >
                 备注仅内部可见，不会展示给客人。
               </div>
-              <textarea
-                value={form?.note ?? ""}
-                onChange={(e) => updateForm("note", e.target.value)}
-                className={cn(inputClass, "min-h-[96px]")}
-                placeholder="例如：喜欢被称呼为豆总；偏爱高楼层海景；忌讳鲜花摆放在房间内等。"
-              />
+
+              <div className="relative">
+                <textarea
+                  ref={remarkTextareaRef}
+                  readOnly={!isRemarkEditing}
+                  value={form?.remark ?? ""}
+                  onChange={(e) => updateForm("remark", e.target.value)}
+                  className={cn(
+                    inputClass,
+                    "min-h-[96px] pr-10",
+                    !isRemarkEditing && "bg-[#F9FAFB] cursor-default"
+                  )}
+                  placeholder="例如：喜欢被称呼为豆总；偏爱高楼层海景；忌讳鲜花摆放在房间内等。"
+                />
+                {/* 笔 icon：点击后进入编辑模式并聚焦输入框 */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsRemarkEditing(true);
+                    setTimeout(() => {
+                      if (remarkTextareaRef.current) {
+                        const el = remarkTextareaRef.current;
+                        el.focus();
+                        const len = el.value.length;
+                        el.setSelectionRange(len, len);
+                      }
+                    }, 0);
+                  }}
+                  className="absolute right-3 top-3 text-xs px-2 py-1 rounded-full"
+                  style={{
+                    backgroundColor: "#F5E3C7",
+                    color: "#7A5A22",
+                  }}
+                >
+                  ✎
+                </button>
+              </div>
+
               <div
                 className="text-[11px]"
                 style={{ color: "var(--text-secondary)" }}
               >
-                修改备注后，请点击下方「更新资料」按钮，将备注写入 VIP 档案。
+                点击右侧笔形图标可开启编辑模式；修改备注后，请点击下方「更新资料」按钮，将备注写入 VIP 档案。
               </div>
             </div>
           )}
@@ -1466,8 +1457,8 @@ function VipContactRow({ contact, isActive, onClick }: VipContactRowProps) {
             style={{ color: "var(--text-secondary)" }}
           >
             {/* ✅ 优先展示备注，没有备注再显示手机号 */}
-            {contact.note
-              ? contact.note
+            {contact.remark
+              ? contact.remark
               : contact.phone
               ? maskPhone(contact.phone)
               : "未填写手机号"}
@@ -1576,32 +1567,75 @@ interface GenericQrModalProps {
 function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
   if (!open) return null;
 
+  const handleCopy = async () => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(entryUrl);
+        alert("已复制通用入口链接。");
+      } else {
+        window.prompt("请复制以下链接：", entryUrl);
+      }
+    } catch (e) {
+      console.error("copy generic link failed:", e);
+    }
+  };
+
   return (
     <div
       className="fixed inset-0 z-40 flex items-center justify-center"
       style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
     >
-      <div
-        className="w-[520px] rounded-2xl overflow-hidden shadow-xl"
-        style={{ backgroundColor: "#FFFFFF" }}
-      >
-        <div className="px-6 py-4 border-b" style={{ borderColor: "var(--divider)" }}>
-          <div
-            className="text-base font-semibold"
-            style={{ color: "var(--text-primary)" }}
+      <div className="w-[360px] rounded-3xl overflow-hidden shadow-2xl">
+        {/* 上半部分：金色卡片（跟专属二维码统一风格） */}
+        <div
+          className="px-6 pt-6 pb-5 text-center relative"
+          style={{
+            background:
+              "linear-gradient(180deg, #F6E4BD 0%, #F3D09C 45%, #F1C48B 100%)",
+          }}
+        >
+          {/* 右上角关闭按钮 */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-4 top-4 text-[14px] leading-none px-1"
+            style={{ color: "#7A5A22" }}
           >
-            通用二维码
-          </div>
-          <div
-            className="mt-1 text-[12px]"
-            style={{ color: "var(--text-secondary)" }}
-          >
-            客人扫描此二维码后，将进入通用的 VIP 访问页面填写资料。
-          </div>
-        </div>
+            ×
+          </button>
 
-        <div className="px-6 py-6 flex items-center gap-6">
-          <div className="w-[160px] h-[160px] rounded-md border flex items-center justify-center overflow-hidden bg-white">
+          <div
+            className="text-[11px] font-medium"
+            style={{ color: "#7A5A22" }}
+          >
+            澳門永利皇宮酒店
+          </div>
+          <div
+            className="text-[11px] mb-3"
+            style={{ color: "#7A5A22" }}
+          >
+            Wynn Palace Cotai
+          </div>
+
+          <div
+            className="h-px w-full mb-4"
+            style={{ backgroundColor: "rgba(0,0,0,0.08)" }}
+          />
+
+          <div
+            className="text-lg font-semibold"
+            style={{ color: "#5B4029" }}
+          >
+            VIP Customer Service
+          </div>
+          <div
+            className="mt-1 text-[11px]"
+            style={{ color: "#7A5A22" }}
+          >
+            Generic access for VIP registration
+          </div>
+
+          <div className="mt-5 mx-auto w-[210px] h-[210px] rounded-2xl bg-white flex items-center justify-center overflow-hidden">
             <img
               src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
                 entryUrl
@@ -1611,56 +1645,140 @@ function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
             />
           </div>
 
-          <div className="flex-1 text-[12px]" style={{ color: "var(--text-secondary)" }}>
-            <div className="mb-2 font-medium" style={{ color: "var(--text-primary)" }}>
-              通用入口链接
-            </div>
-            <code
-              className="block text-[11px] px-2 py-1 rounded border break-all mb-2"
-              style={{
-                backgroundColor: "#F5F5F5",
-                borderColor: "var(--divider)",
-                color: "var(--text-primary)",
-              }}
-            >
-              {entryUrl}
-            </code>
-            <button
-              type="button"
-              className="px-3 py-1 rounded-full text-[11px]"
-              style={{ backgroundColor: "#111111", color: "#FFFFFF" }}
-              onClick={async () => {
-                try {
-                  if (navigator.clipboard?.writeText) {
-                    await navigator.clipboard.writeText(entryUrl);
-                    alert("已复制通用入口链接。");
-                  } else {
-                    window.prompt("请复制以下链接：", entryUrl);
-                  }
-                } catch (e) {
-                  console.error("copy generic link failed:", e);
-                }
-              }}
-            >
-              复制链接
-            </button>
+          <div
+            className="mt-4 text-[10px] break-all px-3 py-2 rounded-md bg-white/70"
+            style={{ color: "#7A5A22" }}
+          >
+            {entryUrl}
           </div>
         </div>
 
-        <div className="px-6 py-3 border-t flex justify-end gap-2" style={{ borderColor: "var(--divider)" }}>
+        {/* 下半部分：复制链接 + 关闭 */}
+        <div className="flex">
           <button
             type="button"
-            className="px-4 py-1.5 rounded-full text-[13px]"
+            onClick={handleCopy}
+            className="flex-1 py-3 text-[13px] font-medium border-r"
             style={{
-              backgroundColor: "#FFFFFF",
-              color: "var(--text-primary)",
-              border: "1px solid var(--divider)",
+              backgroundColor: "#3C2A1A",
+              color: "#FDF3DE",
+              borderColor: "#2B1D11",
             }}
+          >
+            复制链接
+          </button>
+          <button
+            type="button"
             onClick={onClose}
+            className="flex-1 py-3 text-[13px] font-medium"
+            style={{
+              backgroundColor: "#2B1D11",
+              color: "#FDF3DE",
+            }}
           >
             关闭
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+
+interface VipQrModalProps {
+  open: boolean;
+  onClose: () => void;
+  entryUrl: string;
+}
+
+function VipQrModal({ open, onClose, entryUrl }: VipQrModalProps) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center"
+      style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
+    >
+      <div className="w-[360px] rounded-3xl overflow-hidden shadow-2xl">
+
+        {/* 上半部分：金色卡片 */}
+        <div
+          className="px-6 pt-6 pb-5 text-center relative"
+          style={{
+            background:
+              "linear-gradient(180deg, #F6E4BD 0%, #F3D09C 45%, #F1C48B 100%)",
+          }}
+        >
+          {/* 右上角关闭按钮 */}
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute right-4 top-4 text-[14px] leading-none px-1"
+            style={{ color: "#7A5A22" }}
+          >
+            ×
+          </button>
+          <div
+            className="text-[11px] font-medium"
+            style={{ color: "#7A5A22" }}
+          >
+            澳門永利皇宮酒店
+          </div>
+          <div
+            className="text-[11px] mb-3"
+            style={{ color: "#7A5A22" }}
+          >
+            Wynn Palace Cotai
+          </div>
+
+          <div
+            className="h-px w-full mb-4"
+            style={{ backgroundColor: "rgba(0,0,0,0.08)" }}
+          />
+
+          <div
+            className="text-lg font-semibold"
+            style={{ color: "#5B4029" }}
+          >
+            VIP Customer Service
+          </div>
+          <div
+            className="mt-1 text-[11px]"
+            style={{ color: "#7A5A22" }}
+          >
+            Connect to our customer service system
+          </div>
+
+          <div className="mt-5 mx-auto w-[210px] h-[210px] rounded-2xl bg-white flex items-center justify-center overflow-hidden">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
+                entryUrl
+              )}`}
+              alt="VIP 专属二维码"
+              className="w-full h-full object-contain"
+            />
+          </div>
+
+          <div
+            className="mt-4 text-[10px] break-all px-3 py-2 rounded-md bg-white/70"
+            style={{ color: "#7A5A22" }}
+          >
+            {entryUrl}
+          </div>
+        </div>
+
+        {/* 下半部分：按钮条 */}
+        <button
+          type="button"
+          onClick={onClose}
+          className="w-full py-3 text-[13px] font-medium"
+          style={{
+            backgroundColor: "#3C2A1A",
+            color: "#FDF3DE",
+          }}
+        >
+          保存二维码
+        </button>
       </div>
     </div>
   );

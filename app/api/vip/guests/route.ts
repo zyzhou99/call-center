@@ -84,6 +84,7 @@ export async function GET(_req: NextRequest) {
         contactEmail: g.contactEmail,
         preference: g.preference,
         restriction: g.restriction,
+        remark: (((g.remark as string | undefined) || "") as string).trim(),
         qrCode: g.qrCode,
         updatedAt: g.updatedAt.toISOString(),
 
@@ -158,6 +159,8 @@ export async function POST(req: NextRequest) {
       typeof body.preference === "string" ? body.preference.trim() : "";
     const restriction =
       typeof body.restriction === "string" ? body.restriction.trim() : "";
+    const remark =
+      typeof body.remark === "string" ? body.remark.trim() : ""; // ✅ 新增
 
     // ✅ 必填校验：vipNumber + （lastName / firstName / preferredName 三选一）
     if (!vipNumber) {
@@ -197,6 +200,7 @@ export async function POST(req: NextRequest) {
           vipNumber: existing.vipNumber,
           fullName: existing.fullName,
           preferredName: existing.preferredName,
+          remark: existing.remark,
           qrCode: existing.qrCode,
         },
         duplicated: true,
@@ -227,6 +231,7 @@ export async function POST(req: NextRequest) {
         statusLabel,
         preference,
         restriction,
+        remark,
         qrCode: qrCodeTokenRaw,
       },
     });

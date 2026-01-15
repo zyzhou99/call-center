@@ -151,7 +151,7 @@ export async function POST(req: NextRequest) {
           ? vip.preferredName
           : vip.fullName;
 
-      const text = `Dear ${displayName}, welcome to Wynn Palace. This is Joye from VIP Services. How may I assist you today?`;
+      const text = `您好尊貴的貴賓，${displayName}，歡迎下榻永利皇宮。我是 Joye，很高興為您服務，請問今天有什麼可以幫到您？`;
 
       await prisma.message.create({
         data: {
