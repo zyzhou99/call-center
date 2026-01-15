@@ -1,7 +1,12 @@
 // app/api/vip/verify/route.ts
+import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db";
 import { setPendingVipBinding } from "@/lib/vipBindingState";
+
+// ✅ 明确告诉 Next：这是 Node.js runtime 的 API，不能当静态页面搞
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 // 真实企微的 open_kfid（用你现在在 inbox 里用的那一个）
 const REAL_OPEN_KFID =
@@ -19,15 +24,17 @@ const isDev = process.env.NODE_ENV !== "production";
 const DEV_OPEN_KF = "DEV_OPEN_KF";
 const devExternalUserId = (vipNumber: string) => `dev-${vipNumber}`;
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      vipNumber?: string;
-      preferredName?: string | null;
-    };
+    const body = await req.json().catch(() => ({} as any));
 
-    const vipNumber = body.vipNumber?.trim();
-    const preferredName = body.preferredName?.trim() || null;
+    const vipNumber = typeof body.vipNumber === "string"
+      ? body.vipNumber.trim()
+      : "";
+    const preferredName =
+      typeof body.preferredName === "string"
+        ? body.preferredName.trim() || null
+        : null;
 
     if (!vipNumber) {
       return NextResponse.json(
@@ -63,7 +70,7 @@ export async function POST(req: Request) {
       guestToUse.fullName ||
       `VIP ${vipNumber}`;
 
-    // 3) 开发环境：继续使用你之前的 DEV_OPEN_KF + /inbox 流程
+    // 3) 开发环境：继续使用之前的 DEV_OPEN_KF + /inbox 流程
     if (isDev) {
       const externalUserId = devExternalUserId(vipNumber);
 
@@ -98,7 +105,8 @@ export async function POST(req: Request) {
           room: guestToUse.room ?? null,
           vipTier: guestToUse.tier ?? null,
         },
-        kfUrl: null, // DEV 不跳企业微信，还是走 /inbox?sessionId=xxx
+        // 本地 / POC 继续走 inbox
+        kfUrl: null,
         sessionId: session.id,
       });
     }
