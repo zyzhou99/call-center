@@ -22,6 +22,7 @@ type VipContact = {
   preference?: string;
   restriction?: string;
   qrCode?: string; // ✅ 专属 qrCode token
+  sessions?: VipSessionSummary[];
 };
 
 type VipForm = {
@@ -37,6 +38,13 @@ type VipForm = {
   restriction: string;
   note: string; // ✅ 新增：内部备注（映射到 vipGuest.remark）
   isNew: boolean; // 新建还未保存到 DB
+};
+
+type VipSessionSummary = {
+  id: string;
+  channel: string;
+  lastMsgAt: string | null;
+  lastMsgPreview: string;
 };
 
 const MOCK_CONTACTS: VipContact[] = [
@@ -63,6 +71,14 @@ export function VipListView() {
 
   const [showMenu, setShowMenu] = useState(false);
   const [origin, setOrigin] = useState<string | null>(null); // ✅ 当前页面 origin，用来拼 entry 链接
+
+  const [showGenericQr, setShowGenericQr] = useState(false);
+  const [showTagModal, setShowTagModal] = useState(false); // 这个是给第 3 步用的
+
+  const [rightTab, setRightTab] = useState<"history" | "remark" | "merge">(
+    "history"
+  );
+  const [mergeSelection, setMergeSelection] = useState<string[]>([]);
 
   // 拿到当前站点地址，比如 http://localhost:3000 或 https://yl.mo-happy-go.top
   useEffect(() => {
@@ -142,8 +158,42 @@ export function VipListView() {
           const segment = (g.segment as string | undefined) || "";
           const statusLabel = (g.statusLabel as string | undefined) || "";
 
-          const remark = (g.remark as string | undefined) || ""; // ✅ 新增：后端 remark
+          const remark = (g.remark as string | undefined) || ""; // ✅ 后端 remark
           const qrCode = (g.qrCode as string | undefined) || ""; // ✅ 从后端拿 qrCode
+
+          // ✅ 这里尝试从后端拿 sessions，如果暂时没 include，也不会报错，只是空数组
+          const sessionsRaw = Array.isArray(g.sessions) ? g.sessions : [];
+          const sessions: VipSessionSummary[] = sessionsRaw.map(
+            (s: any, idx2: number) => {
+              const idFromApi =
+                (s.id as string | undefined) ||
+                `${index}-${idx2}-${String(s.openKfid ?? "")}-${String(
+                  s.externalUserId ?? ""
+                )}`;
+
+              const channel =
+                (s.channel as string | undefined) ||
+                (s.openKfid ? "wechat" : "webchat");
+
+              const lastMsgAt =
+                (s.lastMsgAt as string | undefined) ||
+                (s.updatedAt as string | undefined) ||
+                (s.createdAt as string | undefined) ||
+                null;
+
+              const lastMsgPreview =
+                (s.lastMsgPreview as string | undefined) ||
+                (s.lastMessage as string | undefined) ||
+                "";
+
+              return {
+                id: idFromApi,
+                channel,
+                lastMsgAt,
+                lastMsgPreview,
+              };
+            }
+          );
 
           return {
             id:
@@ -165,6 +215,7 @@ export function VipListView() {
             preference,
             restriction,
             qrCode,
+            sessions,
           };
         });
 
@@ -190,6 +241,28 @@ export function VipListView() {
     if (!activeId) return sourceContacts[0];
     return sourceContacts.find((c) => c.id === activeId) ?? sourceContacts[0];
   }, [activeId, sourceContacts]);
+
+  // ✅ 排好序的历史会话（最新在前）
+  const historySessions = useMemo(() => {
+    if (!activeContact?.sessions || activeContact.sessions.length === 0) {
+      return [];
+    }
+    return [...activeContact.sessions].sort((a, b) => {
+      const ta = a.lastMsgAt ? new Date(a.lastMsgAt).getTime() : 0;
+      const tb = b.lastMsgAt ? new Date(b.lastMsgAt).getTime() : 0;
+      return tb - ta;
+    });
+  }, [activeContact]);
+
+  // ✅ 合并候选：同一联系人以外的所有记录（后续可以按 VIP 号 / 手机号过滤）
+  const mergeCandidates = useMemo(() => {
+    if (!activeContact) return [];
+    return contacts.filter((c) => c.id !== activeContact.id);
+  }, [contacts, activeContact]);
+
+  useEffect(() => {
+    setMergeSelection([]);
+  }, [activeId]);
 
   // 同步当前选中联系人 → 中间表单
   useEffect(() => {
@@ -529,6 +602,13 @@ export function VipListView() {
       className="flex flex-1 overflow-hidden"
       style={{ backgroundColor: "#F9F8F6" }}
     >
+      {origin && (
+        <GenericQrModal
+          open={showGenericQr}
+          onClose={() => setShowGenericQr(false)}
+          entryUrl={`${origin}/vip-access`} // 这里用你现在通用码真正指向的 URL
+        />
+      )}
       {/* 左侧列表：宽度和 Inbox 的 ConversationListPanel 对齐 */}
       <div
         className="w-96 flex flex-col relative z-10"
@@ -583,7 +663,7 @@ export function VipListView() {
                 color: "#7A5A22",
                 border: "1px solid #E5CFA2",
               }}
-              onClick={() => alert("临时码 / 通用二维码流程稍后再接。")}
+              onClick={() => setShowGenericQr(true)}
             >
               临时码
             </button>
@@ -719,6 +799,7 @@ export function VipListView() {
                         backgroundColor: "#FFF9EF",
                         color: "#8A7254",
                       }}
+                      onClick={() => setShowTagModal(true)}
                     >
                       + Add Tag
                     </button>
@@ -849,7 +930,7 @@ export function VipListView() {
                     className="text-[13px] font-medium mb-4"
                     style={{ color: "var(--text-primary)" }}
                   >
-                    编辑联系人详情
+                    编辑联系人详情（备注请在右侧「备注」页签中维护）
                   </div>
 
                   <div className="grid grid-cols-2 gap-4 text-[13px]">
@@ -926,20 +1007,6 @@ export function VipListView() {
                         placeholder="0323"
                       />
                     </Field>
-
-                    {/* ✅ 新增：备注字段（映射 vipGuest.remark） */}
-                    <div className="col-span-2">
-                      <Field label="备注（内部可见，仅员工查看）">
-                        <textarea
-                          value={form.note}
-                          onChange={(e) =>
-                            updateForm("note", e.target.value)
-                          }
-                          className={cn(inputClass, "min-h-[72px]")}
-                          placeholder="例如：喜欢被称呼为豆总；不喜欢太吵的环境；对花粉过敏等。"
-                        />
-                      </Field>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -1044,7 +1111,21 @@ export function VipListView() {
         ) : null}
       </div>
 
-      {/* 右侧历史记录：和 Inbox 的右侧 panel 对齐 */}
+      {form && (
+        <ManageTagsModal
+          open={showTagModal}
+          onClose={() => setShowTagModal(false)}
+          initialPreference={form.preference}
+          initialRestriction={form.restriction}
+          onSave={(newPref, newRes) => {
+            updateForm("preference", newPref);
+            updateForm("restriction", newRes);
+            setShowTagModal(false);
+          }}
+        />
+      )}
+
+      {/* 右侧 panel：历史记录 / 备注 / 合并 */}
       <div
         className="w-80 flex flex-col"
         style={{
@@ -1052,6 +1133,7 @@ export function VipListView() {
           backgroundColor: "#FFFFFF",
         }}
       >
+        {/* tabs */}
         <div
           className="px-4 pt-4 pb-2 border-b"
           style={{ borderColor: "var(--divider)" }}
@@ -1060,47 +1142,264 @@ export function VipListView() {
             <button
               className="pb-1 border-b-2"
               style={{
-                borderColor: "#F0C88C",
-                color: "var(--text-primary)",
+                borderColor:
+                  rightTab === "history" ? "#F0C88C" : "transparent",
+                color:
+                  rightTab === "history"
+                    ? "var(--text-primary)"
+                    : "var(--text-secondary)",
               }}
+              onClick={() => setRightTab("history")}
             >
               历史记录
             </button>
             <button
-              className="pb-1"
-              style={{ color: "var(--text-secondary)" }}
+              className="pb-1 border-b-2"
+              style={{
+                borderColor:
+                  rightTab === "remark" ? "#F0C88C" : "transparent",
+                color:
+                  rightTab === "remark"
+                    ? "var(--text-primary)"
+                    : "var(--text-secondary)",
+              }}
+              onClick={() => setRightTab("remark")}
             >
               备注
             </button>
             <button
-              className="pb-1"
-              style={{ color: "var(--text-secondary)" }}
+              className="pb-1 border-b-2"
+              style={{
+                borderColor:
+                  rightTab === "merge" ? "#F0C88C" : "transparent",
+                color:
+                  rightTab === "merge"
+                    ? "var(--text-primary)"
+                    : "var(--text-secondary)",
+              }}
+              onClick={() => setRightTab("merge")}
             >
               合并
             </button>
           </div>
         </div>
 
+        {/* tab 内容 */}
         <div className="flex-1 overflow-y-auto px-4 py-4 text-[12px]">
-          <HistoryItem
-            channel="微信渠道"
-            time="10:30 AM"
-            content="客人询问是否可以延迟退房到下午 2 点。"
-          />
-          <HistoryItem
-            channel="WhatsApp"
-            time="昨天"
-            content="发送了酒店位置定位。"
-          />
+          {/* 历史记录 tab */}
+          {rightTab === "history" && (
+            <>
+              {historySessions.length === 0 ? (
+                <div
+                  className="text-[11px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  当前联系人暂无历史对话记录。
+                </div>
+              ) : (
+                <>
+                  {historySessions.map((s) => (
+                    <HistoryItem
+                      key={s.id}
+                      channel={formatChannelLabel(s.channel)}
+                      time={formatTimeFromIso(s.lastMsgAt)}
+                      content={
+                        s.lastMsgPreview || "（无消息内容预览）"
+                      }
+                    />
+                  ))}
+                  <button
+                    className="mt-3 text-[12px]"
+                    style={{ color: "#DAB76E" }}
+                    onClick={() =>
+                      alert("后续可以跳转到 Inbox 里过滤该 VIP 的全部对话。")
+                    }
+                  >
+                    查看更多历史对话
+                  </button>
+                </>
+              )}
+            </>
+          )}
 
-          <button
-            className="mt-3 text-[12px]"
-            style={{ color: "#DAB76E" }}
-          >
-            查看更多历史对话
-          </button>
+          {/* 备注 tab */}
+          {rightTab === "remark" && (
+            <div className="flex flex-col gap-2">
+              <div
+                className="text-[11px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                备注仅内部可见，不会展示给客人。
+              </div>
+              <textarea
+                value={form?.note ?? ""}
+                onChange={(e) => updateForm("note", e.target.value)}
+                className={cn(inputClass, "min-h-[96px]")}
+                placeholder="例如：喜欢被称呼为豆总；偏爱高楼层海景；忌讳鲜花摆放在房间内等。"
+              />
+              <div
+                className="text-[11px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                修改备注后，请点击下方「更新资料」按钮，将备注写入 VIP 档案。
+              </div>
+            </div>
+          )}
+
+          {/* 合并 tab */}
+          {rightTab === "merge" && (
+            <div className="flex flex-col gap-3">
+              <div
+                className="text-[11px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                当同一位 VIP 有多个联系人记录（例如：一个是正式 VIP 档案，一个来自通用二维码），可以在此将对话与档案合并。
+              </div>
+
+              {/* 当前主账号 */}
+              {activeContact && (
+                <div
+                  className="border rounded-md p-3 text-[12px]"
+                  style={{ borderColor: "var(--divider)" }}
+                >
+                  <div
+                    className="text-[11px] mb-1"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    当前主账号
+                  </div>
+                  <div
+                    className="font-medium mb-1"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {activeContact.displayName}
+                  </div>
+                  <div
+                    className="text-[11px]"
+                    style={{ color: "var(--text-secondary)" }}
+                  >
+                    {activeContact.vipNumber
+                      ? `VIP ${activeContact.vipNumber}`
+                      : "暂无 VIP 号 · 可在中间编辑区补录"}
+                  </div>
+                </div>
+              )}
+
+              {/* 可合并账号列表 */}
+              <div
+                className="text-[11px]"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                请选择需要合并到当前主账号下的其他联系人：
+              </div>
+
+              {mergeCandidates.length === 0 ? (
+                <div
+                  className="text-[11px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  当前没有可合并的其他联系人。
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {mergeCandidates.map((c) => {
+                    const checked = mergeSelection.includes(c.id);
+                    const sameVip =
+                      !!c.vipNumber &&
+                      !!activeContact?.vipNumber &&
+                      c.vipNumber === activeContact.vipNumber;
+
+                    return (
+                      <label
+                        key={c.id}
+                        className="flex items-start gap-2 p-2 rounded-md cursor-pointer hover:bg-black/5"
+                      >
+                        <input
+                          type="checkbox"
+                          className="mt-[3px]"
+                          checked={checked}
+                          onChange={() => {
+                            setMergeSelection((prev) =>
+                              checked
+                                ? prev.filter((id) => id !== c.id)
+                                : [...prev, c.id]
+                            );
+                          }}
+                        />
+                        <div className="flex-1 min-w-0">
+                          <div
+                            className="flex items-center gap-2 text-[12px]"
+                            style={{ color: "var(--text-primary)" }}
+                          >
+                            <span className="truncate">
+                              {c.displayName}
+                            </span>
+                            {c.vipNumber && (
+                              <span
+                                className="px-1.5 py-0.5 rounded-full text-[10px]"
+                                style={{
+                                  backgroundColor: "#F3E7D3",
+                                  color: "#7A5A22",
+                                }}
+                              >
+                                VIP {c.vipNumber}
+                              </span>
+                            )}
+                            {sameVip && (
+                              <span
+                                className="px-1.5 py-0.5 rounded-full text-[10px]"
+                                style={{
+                                  backgroundColor: "#DCFCE7",
+                                  color: "#166534",
+                                }}
+                              >
+                                同一 VIP 号
+                              </span>
+                            )}
+                          </div>
+                          <div
+                            className="text-[11px] mt-0.5 truncate"
+                            style={{ color: "var(--text-secondary)" }}
+                          >
+                            {c.phone
+                              ? maskPhone(c.phone)
+                              : "未填写手机号"}
+                          </div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+
+              <button
+                type="button"
+                disabled={mergeSelection.length === 0}
+                onClick={() =>
+                  alert(
+                    "这里先做 UI POC，实际合并逻辑（会话、档案合并）我们下一步再接后端。"
+                  )
+                }
+                className={cn(
+                  "mt-2 px-4 py-2 rounded-full text-[12px] font-medium disabled:opacity-60 disabled:cursor-not-allowed text-white"
+                )}
+                style={{ backgroundColor: "#111111" }}
+              >
+                合并所选联系人
+              </button>
+
+              <div
+                className="text-[11px] mt-1"
+                style={{ color: "var(--text-secondary)" }}
+              >
+                建议：确定主账号后，再将临时账号（通用二维码创建的）合并进来，以保证 VIP
+                档案与历史对话集中到同一条记录。
+              </div>
+            </div>
+          )}
         </div>
       </div>
+
     </div>
   );
 }
@@ -1231,6 +1530,28 @@ function HistoryItem(props: {
   );
 }
 
+function formatChannelLabel(channel: string): string {
+  const c = (channel || "").toLowerCase();
+  if (c === "wechat") return "微信渠道";
+  if (c === "webchat" || c === "h5") return "H5 / Web";
+  if (c === "whatsapp") return "WhatsApp";
+  if (c === "email") return "Email";
+  if (c === "phone") return "电话";
+  return channel || "其他";
+}
+
+function formatTimeFromIso(iso?: string | null): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString("zh-CN", {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function getInitials(name: string): string {
   const parts = name.split(/\s+/).filter(Boolean);
   if (!parts.length) return "?";
@@ -1244,6 +1565,338 @@ function splitTags(raw: string): string[] {
     .split(/[,，、;；]/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+interface GenericQrModalProps {
+  open: boolean;
+  onClose: () => void;
+  entryUrl: string;
+}
+
+function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center"
+      style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
+    >
+      <div
+        className="w-[520px] rounded-2xl overflow-hidden shadow-xl"
+        style={{ backgroundColor: "#FFFFFF" }}
+      >
+        <div className="px-6 py-4 border-b" style={{ borderColor: "var(--divider)" }}>
+          <div
+            className="text-base font-semibold"
+            style={{ color: "var(--text-primary)" }}
+          >
+            通用二维码
+          </div>
+          <div
+            className="mt-1 text-[12px]"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            客人扫描此二维码后，将进入通用的 VIP 访问页面填写资料。
+          </div>
+        </div>
+
+        <div className="px-6 py-6 flex items-center gap-6">
+          <div className="w-[160px] h-[160px] rounded-md border flex items-center justify-center overflow-hidden bg-white">
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=${encodeURIComponent(
+                entryUrl
+              )}`}
+              alt="通用二维码"
+              className="w-full h-full object-contain"
+            />
+          </div>
+
+          <div className="flex-1 text-[12px]" style={{ color: "var(--text-secondary)" }}>
+            <div className="mb-2 font-medium" style={{ color: "var(--text-primary)" }}>
+              通用入口链接
+            </div>
+            <code
+              className="block text-[11px] px-2 py-1 rounded border break-all mb-2"
+              style={{
+                backgroundColor: "#F5F5F5",
+                borderColor: "var(--divider)",
+                color: "var(--text-primary)",
+              }}
+            >
+              {entryUrl}
+            </code>
+            <button
+              type="button"
+              className="px-3 py-1 rounded-full text-[11px]"
+              style={{ backgroundColor: "#111111", color: "#FFFFFF" }}
+              onClick={async () => {
+                try {
+                  if (navigator.clipboard?.writeText) {
+                    await navigator.clipboard.writeText(entryUrl);
+                    alert("已复制通用入口链接。");
+                  } else {
+                    window.prompt("请复制以下链接：", entryUrl);
+                  }
+                } catch (e) {
+                  console.error("copy generic link failed:", e);
+                }
+              }}
+            >
+              复制链接
+            </button>
+          </div>
+        </div>
+
+        <div className="px-6 py-3 border-t flex justify-end gap-2" style={{ borderColor: "var(--divider)" }}>
+          <button
+            type="button"
+            className="px-4 py-1.5 rounded-full text-[13px]"
+            style={{
+              backgroundColor: "#FFFFFF",
+              color: "var(--text-primary)",
+              border: "1px solid var(--divider)",
+            }}
+            onClick={onClose}
+          >
+            关闭
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface ManageTagsModalProps {
+  open: boolean;
+  onClose: () => void;
+  initialPreference: string;
+  initialRestriction: string;
+  onSave: (preference: string, restriction: string) => void;
+}
+
+function ManageTagsModal({
+  open,
+  onClose,
+  initialPreference,
+  initialRestriction,
+  onSave,
+}: ManageTagsModalProps) {
+  const [prefTags, setPrefTags] = useState<string[]>([]);
+  const [alertTags, setAlertTags] = useState<string[]>([]);
+  const [prefInput, setPrefInput] = useState("");
+  const [alertInput, setAlertInput] = useState("");
+
+  // 打开时同步当前表单里的值
+  useEffect(() => {
+    if (!open) return;
+    setPrefTags(splitTags(initialPreference || ""));
+    setAlertTags(splitTags(initialRestriction || ""));
+    setPrefInput("");
+    setAlertInput("");
+  }, [open, initialPreference, initialRestriction]);
+
+  if (!open) return null;
+
+  const handleAddPref = () => {
+    const v = prefInput.trim();
+    if (!v) return;
+    if (!prefTags.includes(v)) {
+      setPrefTags([...prefTags, v]);
+    }
+    setPrefInput("");
+  };
+
+  const handleAddAlert = () => {
+    const v = alertInput.trim();
+    if (!v) return;
+    if (!alertTags.includes(v)) {
+      setAlertTags([...alertTags, v]);
+    }
+    setAlertInput("");
+  };
+
+  const handleSave = () => {
+    const prefStr = prefTags.join(", ");
+    const alertStr = alertTags.join(", ");
+    onSave(prefStr, alertStr);
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center"
+      style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
+    >
+      <div
+        className="w-[560px] rounded-2xl overflow-hidden shadow-xl"
+        style={{ backgroundColor: "#FFFFFF" }}
+      >
+        <div
+          className="px-6 py-4 border-b"
+          style={{ borderColor: "var(--divider)" }}
+        >
+          <div
+            className="text-base font-semibold"
+            style={{ color: "var(--text-primary)" }}
+          >
+            Manage Tags
+          </div>
+        </div>
+
+        <div className="px-6 py-5 space-y-6 text-[12px]">
+          {/* Preferences */}
+          <TagEditorSection
+            title="Preferences"
+            placeholder="请输入偏好标签，例如 Whisky / Coffee / Soft Bedding"
+            inputValue={prefInput}
+            onInputChange={setPrefInput}
+            onAdd={handleAddPref}
+            tags={prefTags}
+            onRemoveTag={(tag) =>
+              setPrefTags(prefTags.filter((t) => t !== tag))
+            }
+            tagStyle="pref"
+          />
+
+          {/* Alerts / Restrictions */}
+          <TagEditorSection
+            title="Alerts"
+            placeholder="请输入提醒/禁忌标签，例如 Allergy、忌辣…"
+            inputValue={alertInput}
+            onInputChange={setAlertInput}
+            onAdd={handleAddAlert}
+            tags={alertTags}
+            onRemoveTag={(tag) =>
+              setAlertTags(alertTags.filter((t) => t !== tag))
+            }
+            tagStyle="alert"
+          />
+        </div>
+
+        <div
+          className="px-6 py-3 border-t flex justify-end gap-3"
+          style={{ borderColor: "var(--divider)" }}
+        >
+          <button
+            type="button"
+            className="px-4 py-1.5 rounded-full text-[13px]"
+            style={{
+              backgroundColor: "#FFFFFF",
+              color: "var(--text-primary)",
+              border: "1px solid var(--divider)",
+            }}
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="px-5 py-1.5 rounded-full text-[13px] text-white"
+            style={{ backgroundColor: "#111111" }}
+            onClick={handleSave}
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+interface TagEditorSectionProps {
+  title: string;
+  placeholder: string;
+  inputValue: string;
+  onInputChange: (v: string) => void;
+  onAdd: () => void;
+  tags: string[];
+  onRemoveTag: (tag: string) => void;
+  tagStyle: "pref" | "alert";
+}
+
+function TagEditorSection({
+  title,
+  placeholder,
+  inputValue,
+  onInputChange,
+  onAdd,
+  tags,
+  onRemoveTag,
+  tagStyle,
+}: TagEditorSectionProps) {
+  const isPref = tagStyle === "pref";
+
+  return (
+    <div>
+      <div
+        className="mb-2 text-[13px] font-medium"
+        style={{ color: "var(--text-primary)" }}
+      >
+        {title}
+      </div>
+
+      <div
+        className="flex items-center gap-2 px-3 py-2 rounded-md border mb-2"
+        style={{
+          borderColor: "var(--divider)",
+          backgroundColor: "#FAFAFA",
+        }}
+      >
+        <input
+          value={inputValue}
+          onChange={(e) => onInputChange(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              onAdd();
+            }
+          }}
+          placeholder={placeholder}
+          className="flex-1 bg-transparent text-[12px] focus:outline-none"
+        />
+        <button
+          type="button"
+          className="text-[12px]"
+          style={{ color: "var(--accent)" }}
+          onClick={onAdd}
+        >
+          添加
+        </button>
+      </div>
+
+      <div
+        className="text-[11px] mb-1"
+        style={{ color: "var(--text-secondary)" }}
+      >
+        Active {title} ({tags.length})
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {tags.map((tag) => (
+          <button
+            key={tag}
+            type="button"
+            className="px-3 py-1 rounded-full text-[11px] flex items-center gap-1"
+            style={{
+              backgroundColor: isPref ? "#F5E3C7" : "#FDE5E5",
+              color: isPref ? "#7A5A22" : "#B91C1C",
+            }}
+            onClick={() => onRemoveTag(tag)}
+          >
+            <span>{tag}</span>
+            <span>×</span>
+          </button>
+        ))}
+        {!tags.length && (
+          <span
+            className="text-[11px]"
+            style={{ color: "var(--text-secondary)" }}
+          >
+            暂无标签。
+          </span>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function maskPhone(phone: string): string {

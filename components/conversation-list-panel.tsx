@@ -82,29 +82,37 @@ export function ConversationListPanel({
                   {t("search.noResults") ?? "No matching conversations"}
                 </div>
               ) : (
-                searchResults.map((conv) => (
-                  <button
-                    key={conv.id}
-                    type="button"
-                    onClick={() => onSearchResultSelect(conv.id)}
-                    className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-black/5"
-                  >
-                    <span
-                      className="truncate text-sm"
-                      style={{ color: "var(--text-primary)" }}
+                searchResults.map((conv) => {
+                  // ⭐ 这里也优先用 preferredName / fullName
+                  const displayName =
+                    (conv as any).preferredName ||
+                    (conv as any).fullName ||
+                    conv.displayName;
+
+                  return (
+                    <button
+                      key={conv.id}
+                      type="button"
+                      onClick={() => onSearchResultSelect(conv.id)}
+                      className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-black/5"
                     >
-                      {conv.displayName}
-                    </span>
-                    {conv.lastMessagePreview && (
                       <span
-                        className="ml-2 text-xs truncate"
-                        style={{ color: "var(--text-secondary)" }}
+                        className="truncate text-sm"
+                        style={{ color: "var(--text-primary)" }}
                       >
-                        {conv.lastMessagePreview}
+                        {displayName}
                       </span>
-                    )}
-                  </button>
-                ))
+                      {conv.lastMessagePreview && (
+                        <span
+                          className="ml-2 text-xs truncate"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {conv.lastMessagePreview}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
               )}
             </div>
           )}
@@ -152,9 +160,16 @@ function ConversationRow({
   onClick,
   messages,
 }: ConversationRowProps) {
-  const initials = conversation.displayName
+  // ⭐ 这里统一算一个 displayName：优先 preferredName，再 fullName，再原来的 displayName
+  const displayName =
+    (conversation as any).preferredName ||
+    (conversation as any).fullName ||
+    conversation.displayName;
+
+  const initials = displayName
     .split(" ")
-    .map((n) => n[0])
+    .filter(Boolean)
+    .map((n: string) => n[0] || "")
     .join("")
     .toUpperCase()
     .slice(0, 2);
@@ -206,7 +221,7 @@ function ConversationRow({
               className="font-medium truncate"
               style={{ color: "var(--text-primary)" }}
             >
-              {conversation.displayName}
+              {displayName}
             </span>
             {vipColor && (
               <div

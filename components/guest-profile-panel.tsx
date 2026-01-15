@@ -75,7 +75,7 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
       )
     : "";
 
-  // 本地可编辑的 tag 状态（点击 x 后只在前端消失，不写 DB）
+  // 本地可编辑的 tag 状态（现在只做展示，不再提供本地删除）
   const [preferenceTags, setPreferenceTags] = useState<string[]>(() =>
     splitToTags(preferenceRawBase)
   );
@@ -97,18 +97,34 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
 
   if (!profile) return null;
 
-  // 头像下面用 DB 的 fullName（缺失时退回 profile.name）
+  // 从 DB 里拿 fullName / preferredName
   const fullName =
-    ((profile as any).fullName as string | undefined) || profile.name || "";
+    ((((profile as any).fullName as string | undefined) ||
+      profile.name ||
+      "") as string).trim();
+
+  const preferredName =
+    ((((profile as any).preferredName as string | undefined) ||
+      "") as string).trim();
+
+  // 头像下面 & 首字母显示用的名字：优先 preferredName
+  const displayName = preferredName || fullName || profile.name || "";
 
   const vipNumber = profile.vipNumber;
   const room = profile.room;
 
-  const guestInitials = getInitialsFromName(fullName);
+  const guestInitials = getInitialsFromName(displayName || fullName);
   const agentInitials = getInitialsFromName(selectedAgent);
 
   const guestDetailsTitle = t("guestDetails.title") || "GUEST DETAILS";
   const quickActionsTitle = t("quickActions.title") || "QUICK ACTIONS";
+
+  // remark 来自 vipGuest.remark
+  const remark =
+    ((((profile as any).remark as string | undefined) || "") as string).trim();
+
+  const hasAnyTag =
+    preferenceTags.length > 0 || restrictionTags.length > 0;
 
   return (
     <div
@@ -128,7 +144,7 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
             className="text-xl font-semibold text-center"
             style={{ color: "var(--text-primary)" }}
           >
-            {fullName}
+            {displayName}
           </h2>
 
           {vipNumber && (
@@ -156,6 +172,13 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
         open={detailsOpen}
         onToggle={() => setDetailsOpen((o) => !o)}
       >
+        {/* 新增：fullName / preferredName */}
+        <DetailsRow label="Full name" value={fullName || "-"} />
+        <DetailsRow
+          label="Preferred name"
+          value={preferredName || "-"}
+        />
+
         <DetailsRow
           label={t("guestDetails.checkIn")}
           value={profile.checkInDate}
@@ -175,6 +198,9 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
           value={profile.statusLabel}
           isStatus
         />
+
+        {/* 最下面增加 remark */}
+        <DetailsRow label="Remark" value={remark || "-"} />
       </Section>
 
       {/* Section 2: Preference Tags */}
@@ -183,42 +209,32 @@ export function GuestProfilePanel({ profile }: GuestProfilePanelProps) {
         open={prefsOpen}
         onToggle={() => setPrefsOpen((o) => !o)}
       >
-        <div className="flex flex-wrap gap-2">
-          {/* 预留的 + Add Tag 按钮 */}
-          <button
-            type="button"
-            className="inline-flex items-center px-3 py-1 text-xs rounded-[10px] border border-dashed"
-            style={{
-              borderColor: "#C19A60",
-              color: "#9C7D47",
-              backgroundColor: "#ffffffff",
-            }}
+        {hasAnyTag ? (
+          <div className="flex flex-wrap gap-2">
+            {preferenceTags.map((tag, idx) => (
+              <TagPill
+                key={`pref-${idx}-${tag}`}
+                kind="preference"
+                label={tag}
+              />
+            ))}
+
+            {restrictionTags.map((tag, idx) => (
+              <TagPill
+                key={`rest-${idx}-${tag}`}
+                kind="restriction"
+                label={tag}
+              />
+            ))}
+          </div>
+        ) : (
+          <p
+            className="text-xs"
+            style={{ color: "var(--text-secondary)" }}
           >
-            + Add Tag
-          </button>
-
-          {preferenceTags.map((tag, idx) => (
-            <TagPill
-              key={`pref-${idx}-${tag}`}
-              kind="preference"
-              label={tag}
-              onRemove={() =>
-                setPreferenceTags((prev) => prev.filter((_, i) => i !== idx))
-              }
-            />
-          ))}
-
-          {restrictionTags.map((tag, idx) => (
-            <TagPill
-              key={`rest-${idx}-${tag}`}
-              kind="restriction"
-              label={tag}
-              onRemove={() =>
-                setRestrictionTags((prev) => prev.filter((_, i) => i !== idx))
-              }
-            />
-          ))}
-        </div>
+            该用户当前没有记录任何喜好。
+          </p>
+        )}
       </Section>
 
       {/* Section 3: Quick Actions */}
@@ -419,8 +435,8 @@ interface TagPillProps {
   onRemove?: () => void;
 }
 
-// 单个 Tag：小一点的圆角 + 右侧 x 按钮
-function TagPill({ kind, label, onRemove }: TagPillProps) {
+// 单个 Tag：小一点的圆角
+function TagPill({ kind, label }: TagPillProps) {
   const isRestriction = kind === "restriction";
 
   const bg = isRestriction ? "#FEF6F6" : "#F5F2ED";
@@ -434,23 +450,10 @@ function TagPill({ kind, label, onRemove }: TagPillProps) {
         backgroundColor: bg,
         color: text,
         border: `1px solid ${border}`,
-        borderRadius: "10px", // 比原来的 pill 小一点
+        borderRadius: "10px",
       }}
     >
-      <span className="mr-1">{label}</span>
-      {onRemove && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            onRemove();
-          }}
-          className="ml-1 text-[11px] leading-none"
-          style={{ color: text }}
-        >
-          ×
-        </button>
-      )}
+      <span>{label}</span>
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Conversation, Message } from "@/types";
-import { Phone, Smile, Paperclip, Mic, Send, ChevronDown} from "lucide-react";
+import { Phone, Smile, Paperclip, Mic, Send, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/language-context";
 
@@ -57,9 +57,25 @@ export function ChatPanel({
     );
   }
 
-  const initials = conversation.displayName
+  // ✅ 统一显示名字：优先用 vipGuest.preferredName，其次 vipGuest.fullName，最后才用原来的 displayName
+  const vipPreferredName =
+    (conversation as any).vipPreferredName ??
+    (conversation as any).vipGuest?.preferredName ??
+    null;
+  const vipFullName =
+    (conversation as any).vipFullName ??
+    (conversation as any).vipGuest?.fullName ??
+    null;
+
+  const displayName =
+    (vipPreferredName && String(vipPreferredName).trim()) ||
+    (vipFullName && String(vipFullName).trim()) ||
+    conversation.displayName;
+
+  const initials = displayName
     .split(" ")
-    .map((n) => n[0])
+    .filter(Boolean)
+    .map((part: string) => part[0] ?? "")
     .join("")
     .toUpperCase()
     .slice(0, 2);
@@ -91,7 +107,7 @@ export function ChatPanel({
               className="font-medium"
               style={{ color: "var(--text-primary)" }}
             >
-              {conversation.displayName}
+              {displayName}
             </h2>
           </div>
         </div>
