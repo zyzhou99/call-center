@@ -10,12 +10,15 @@ interface ChatPanelProps {
   conversation: Conversation | null;
   messages: Message[];
   onSendMessage: (text: string) => void;
+  // ⭐ 新增：手機端點擊返回列表
+  onMobileBack?: () => void;
 }
 
 export function ChatPanel({
   conversation,
   messages,
   onSendMessage,
+  onMobileBack,
 }: ChatPanelProps) {
   const [messageText, setMessageText] = useState("");
   const [status, setStatus] = useState<"open" | "resolved">("open");
@@ -87,12 +90,23 @@ export function ChatPanel({
 
   return (
     <div className="flex-1 flex flex-col bg-white">
-      {/* 顶部：头像 + 名字 + 电话按钮 */}
+      {/* 顶部：返回（手機）+ 头像 + 名字 + 电话按钮 */}
       <div
-        className="px-6 py-4 flex items-center justify-between"
+        className="px-4 py-3 md:px-6 md:py-4 flex items-center justify-between"
         style={{ borderBottom: "1px solid var(--divider)" }}
       >
         <div className="flex items-center space-x-3">
+          {/* ⭐ 手機端的返回按鈕：只在 < md 並且有 onMobileBack 時顯示 */}
+          {onMobileBack && (
+            <button
+              type="button"
+              onClick={onMobileBack}
+              className="mr-1 flex h-8 w-8 items-center justify-center rounded-full border border-[#e4d4bd] md:hidden"
+            >
+              <span className="text-lg text-[#4b3a2b]">‹</span>
+            </button>
+          )}
+
           <div
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
             style={{
@@ -156,7 +170,7 @@ export function ChatPanel({
             )}
           </div>
 
-          {/* 電話按鈕（原樣保留，只是向右挪一點） */}
+          {/* 電話按鈕（原樣保留） */}
           <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
             <Phone
               className="w-5 h-5"
@@ -213,7 +227,7 @@ export function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 底部输入框：保持你原来的样式 & 逻辑 */}
+      {/* 底部输入框：保持你原来的样式 & 逻辑；已經固定在底部 */}
       <div
         className="px-6 py-4"
         style={{ borderTop: "1px solid var(--divider)" }}

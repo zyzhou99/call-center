@@ -1387,24 +1387,11 @@ function InboxContent() {
                 ) : (
                   // 会话详情页：ChatPanel 占满，输入框自然在底部
                   <div className="flex-1 flex flex-col overflow-hidden relative">
-                    {/* 返回按钮：放在聊天区左上角 */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setMobileConversationView("list")
-                      }
-                      className="absolute z-20 top-3 left-3 p-1 rounded-full bg-white/90 shadow"
-                    >
-                      <span
-                        className="inline-block border-l-2 border-b-2 w-3 h-3 rotate-45"
-                        style={{ borderColor: "var(--text-primary)" }}
-                      />
-                    </button>
-
                     <ChatPanel
                       conversation={activeConversation}
                       messages={activeMessages}
                       onSendMessage={handleSendMessage}
+                      onMobileBack={() => setMobileConversationView("list")}
                     />
                   </div>
                 )}
@@ -1416,7 +1403,7 @@ function InboxContent() {
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}
-            className="fixed bottom-6 left-4 z-30 rounded-full shadow-lg p-6 bg-white"
+            className="fixed bottom-16 left-8 z-30 rounded-full shadow-lg p-6 bg-white"
           >
             <div className="flex flex-col gap-[3px]">
               <span
