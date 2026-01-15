@@ -606,7 +606,7 @@ export function VipListView() {
         <GenericQrModal
           open={showGenericQr}
           onClose={() => setShowGenericQr(false)}
-          entryUrl={`${origin}/vip-access`} // 这里用你现在通用码真正指向的 URL
+          entryUrl={`${origin}/vip-request`} // 这里用你现在通用码真正指向的 URL
         />
       )}
       {/* 左侧列表：宽度和 Inbox 的 ConversationListPanel 对齐 */}
