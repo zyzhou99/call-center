@@ -40,7 +40,7 @@ export function ConversationListPanel({
 
   return (
     <div
-      className="w-96 flex flex-col relative z-10"
+      className="w-full md:w-96 flex flex-col relative z-10"
       style={{
         backgroundColor: "#F9F8F6",
         borderRight: "1px solid var(--divider)",

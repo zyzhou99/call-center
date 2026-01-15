@@ -18,7 +18,6 @@ import type { GuestProfile } from "@/types";
 import { getLastMessageTimestamp } from "@/lib/conversation-utils";
 import { VipRequestsView } from "@/components/inbox/vip-requests-view";
 import { VipListView } from "@/components/inbox/vip-list-view";
-import { cn } from "@/lib/utils";
 
 type VipRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
 
@@ -56,34 +55,58 @@ export default function InboxPage() {
 function InboxContent() {
   const searchParams = useSearchParams();
 
-  const [activeChannel, setActiveChannel] = useState<InboxChannel>("wechat");
+  // 🟡 仅用于手机端 UI 的状态，不影响任何数据逻辑
+  const [isMobile, setIsMobile] = useState(false);
+  const [mobileConversationView, setMobileConversationView] =
+    useState<"list" | "detail">("list"); // 列表 / 详情
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // 左下角菜单是否打开
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768); // <768 一律当成手机端
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
+  const [activeChannel, setActiveChannel] =
+    useState<InboxChannel>("wechat");
   const [searchQuery, setSearchQuery] = useState("");
   const [vipPendingCount, setVipPendingCount] = useState(0);
 
   // mock 会话（非微信、非 webchat 实会话）
-  const [mockConvs, setMockConvs] = useState<Conversation[]>(mockConversations);
+  const [mockConvs, setMockConvs] =
+    useState<Conversation[]>(mockConversations);
 
   // 真实 wechat 会话（包括真 WeCom + H5 via WeChat）
-  const [wecomConversations, setWecomConversations] = useState<Conversation[]>(
+  const [wecomConversations, setWecomConversations] = useState<
+    Conversation[]
+  >([]);
+
+  // 真实 H5 / webchat 会话（瀏覽器掃碼的 H5）
+  const [h5Conversations, setH5Conversations] = useState<Conversation[]>(
     []
   );
 
-  // 真实 H5 / webchat 会话（瀏覽器掃碼的 H5）
-  const [h5Conversations, setH5Conversations] = useState<Conversation[]>([]);
-
   // 真实 H5 via WeChat 会话（微信內打開但走本地 H5 模式）
-  const [h5WeChatConversations, setH5WeChatConversations] = useState<Conversation[]>([]);
+  const [h5WeChatConversations, setH5WeChatConversations] = useState<
+    Conversation[]
+  >([]);
 
   // 所有 channel 的消息（wechat + webchat + mock）
-  const [messagesState, setMessagesState] =
-    useState<Record<string, Message[]>>(mockMessages);
+  const [messagesState, setMessagesState] = useState<
+    Record<string, Message[]>
+  >(mockMessages);
 
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(
-    mockConversations[0]?.id || null
-  );
+  const [activeConversationId, setActiveConversationId] = useState<
+    string | null
+  >(mockConversations[0]?.id || null);
 
   // 右侧 Guest Profile
-  const [activeProfile, setActiveProfile] = useState<GuestProfile | null>(null);
+  const [activeProfile, setActiveProfile] =
+    useState<GuestProfile | null>(null);
 
   // WeCom 未读快照
   const wecomServerUnreadsRef = useRef<Record<string, number>>({});
@@ -115,7 +138,9 @@ function InboxContent() {
     }
 
     try {
-      const rawH5 = window.localStorage.getItem(H5_UNREAD_BASE_STORAGE_KEY);
+      const rawH5 = window.localStorage.getItem(
+        H5_UNREAD_BASE_STORAGE_KEY
+      );
       if (rawH5) {
         const parsed = JSON.parse(rawH5);
         if (parsed && typeof parsed === "object") {
@@ -138,7 +163,8 @@ function InboxContent() {
       stored === "webchat" ||
       stored === "email" ||
       stored === "phone" ||
-      stored === "vipRequests"
+      stored === "vipRequests" ||
+      stored === "vipContacts"
     ) {
       setActiveChannel(stored as InboxChannel);
     }
@@ -148,6 +174,10 @@ function InboxContent() {
     setActiveChannel(channel);
     if (typeof window !== "undefined") {
       window.localStorage.setItem(CHANNEL_STORAGE_KEY, String(channel));
+    }
+    // 手机端切换 channel 时，回到会话列表视图
+    if (isMobile) {
+      setMobileConversationView("list");
     }
   };
 
@@ -168,7 +198,10 @@ function InboxContent() {
         const data = await resp.json();
 
         if (!data?.ok || !data.profile) {
-          console.warn("Failed to load VIP profile from sessionId:", data?.error);
+          console.warn(
+            "Failed to load VIP profile from sessionId:",
+            data?.error
+          );
           return;
         }
 
@@ -182,7 +215,7 @@ function InboxContent() {
             id: sessionId,
             channel: "wechat",
             displayName: profile.name,
-            lastMessagePreview: profile.notes || "",
+            lastMessagePreview: (profile as any).notes || "",
             unreadCount: 0,
             lastMessageAtLabel: "",
             vip: false,
@@ -191,11 +224,15 @@ function InboxContent() {
 
           return [...prev, newConv];
         });
+
+        if (isMobile) {
+          setMobileConversationView("detail");
+        }
       } catch (e) {
         console.error("Error fetching VIP profile for sessionId:", e);
       }
     })();
-  }, [sessionIdFromUrl]);
+  }, [sessionIdFromUrl, isMobile]);
 
   // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
   useEffect(() => {
@@ -212,7 +249,9 @@ function InboxContent() {
         const list: VipRequestApi[] =
           (Array.isArray(data.items) ? data.items : data.approvals) ?? [];
 
-        const pending = list.filter((r) => r.status === "PENDING").length;
+        const pending = list.filter(
+          (r) => r.status === "PENDING"
+        ).length;
 
         setVipPendingCount(pending);
       } catch (e) {
@@ -237,7 +276,9 @@ function InboxContent() {
     const fetchSessions = async () => {
       try {
         const resp = await fetch(
-          `/api/wecom/sessions?open_kfid=${encodeURIComponent(OPEN_KFID)}`,
+          `/api/wecom/sessions?open_kfid=${encodeURIComponent(
+            OPEN_KFID
+          )}`,
           {
             headers: { "x-admin-token": ADMIN },
           }
@@ -245,7 +286,8 @@ function InboxContent() {
         const data = await resp.json();
         if (!data?.ok || stopped) return;
 
-        const rawList: any[] = data.sessions || data.conversations || [];
+        const rawList: any[] =
+          data.sessions || data.conversations || [];
 
         const serverConvs: Conversation[] = rawList.map((c: any) => {
           const conv: Conversation = {
@@ -258,7 +300,8 @@ function InboxContent() {
               c.displayName ||
               c.externalUserId ||
               c.id,
-            lastMessagePreview: c.lastMsgPreview || c.lastMessagePreview || "",
+            lastMessagePreview:
+              c.lastMsgPreview || c.lastMessagePreview || "",
             unreadCount: Number(c.unreadCount || 0),
             lastMessageAtLabel: "",
             vip: false,
@@ -331,8 +374,6 @@ function InboxContent() {
       if (timer) clearInterval(timer);
     };
   }, []); // ✅ 不再依赖 activeConversationId
-
-
 
   // 加载 + 轮询 H5 / webchat 会话列表（瀏覽器 H5）
   useEffect(() => {
@@ -476,7 +517,14 @@ function InboxContent() {
 
       return bTimestamp - aTimestamp;
     });
-  }, [activeChannel, wecomConversations, h5WeChatConversations, h5Conversations, mockConvs, messagesState]);
+  }, [
+    activeChannel,
+    wecomConversations,
+    h5WeChatConversations,
+    h5Conversations,
+    mockConvs,
+    messagesState,
+  ]);
 
   // 左侧栏未读数（包含 vipRequests + webchat）
   const unreadCounts = useMemo(() => {
@@ -543,7 +591,9 @@ function InboxContent() {
   const activeMessages: Message[] = useMemo(() => {
     if (!activeConversationId) return [];
 
-    const conv = allConversations.find((c) => c.id === activeConversationId);
+    const conv = allConversations.find(
+      (c) => c.id === activeConversationId
+    );
 
     const fromState = messagesState[activeConversationId];
     if (fromState && fromState.length > 0) {
@@ -565,7 +615,9 @@ function InboxContent() {
     const byId: Record<string, Conversation> = {};
 
     allConversations.forEach((conv) => {
-      const nameMatch = conv.displayName?.toLowerCase().includes(q);
+      const nameMatch = conv.displayName
+        ?.toLowerCase()
+        .includes(q);
       const previewMatch = (conv.lastMessagePreview || "")
         .toLowerCase()
         .includes(q);
@@ -575,7 +627,8 @@ function InboxContent() {
         conv.channel === "wechat" || conv.channel === "webchat"
           ? []
           : mockMessages[conv.id] || [];
-      const msgs = fromState.length > 0 ? fromState : fromMock;
+      const msgs =
+        fromState.length > 0 ? fromState : fromMock;
 
       const messagesMatch = msgs.some((m) =>
         (m.text || "").toLowerCase().includes(q)
@@ -620,7 +673,7 @@ function InboxContent() {
         (conv as any).isH5 === true ||
         (typeof externalUserId === "string" &&
           (externalUserId.startsWith("h5:") ||
-           externalUserId.startsWith("wxh5:")));
+            externalUserId.startsWith("wxh5:")));
 
       if (isH5WeChat) {
         // ✅ H5 via WeChat：走 H5 API 拉消息
@@ -650,7 +703,9 @@ function InboxContent() {
               timestamp:
                 typeof m.timestamp === "number"
                   ? m.timestamp
-                  : new Date(m.timestamp || Date.now()).getTime(),
+                  : new Date(
+                      m.timestamp || Date.now()
+                    ).getTime(),
             }));
 
             setMessagesState((prev) => ({
@@ -684,7 +739,8 @@ function InboxContent() {
           const wecomServerUnreads = wecomServerUnreadsRef.current;
           wecomUnreadBaseRef.current = {
             ...wecomUnreadBaseRef.current,
-            [conversationId]: wecomServerUnreads[conversationId] || 0,
+            [conversationId]:
+              wecomServerUnreads[conversationId] || 0,
           };
 
           if (typeof window !== "undefined") {
@@ -796,6 +852,10 @@ function InboxContent() {
         console.error("load VIP profile (wechat) failed:", e);
       }
 
+      if (isMobile) {
+        setMobileConversationView("detail");
+      }
+
       return;
     }
 
@@ -827,7 +887,9 @@ function InboxContent() {
             timestamp:
               typeof m.timestamp === "number"
                 ? m.timestamp
-                : new Date(m.timestamp || Date.now()).getTime(),
+                : new Date(
+                    m.timestamp || Date.now()
+                  ).getTime(),
           }));
 
           setMessagesState((prev) => ({
@@ -849,7 +911,10 @@ function InboxContent() {
               JSON.stringify(h5UnreadBaseRef.current)
             );
           } catch (e) {
-            console.error("save h5 unread base (select webchat) failed:", e);
+            console.error(
+              "save h5 unread base (select webchat) failed:",
+              e
+            );
           }
         }
 
@@ -877,13 +942,17 @@ function InboxContent() {
         setActiveProfile(null);
       }
 
+      if (isMobile) {
+        setMobileConversationView("detail");
+      }
+
       return;
     }
 
     // 其它渠道（mock）
     setMockConvs((prevConversations) =>
-      prevConversations.map((conv) =>
-        conv.id === conversationId ? { ...conv, unreadCount: 0 } : conv
+      prevConversations.map((c) =>
+        c.id === conversationId ? { ...c, unreadCount: 0 } : c
       )
     );
 
@@ -901,6 +970,10 @@ function InboxContent() {
     });
 
     setActiveProfile(mockProfiles[conversationId] || null);
+
+    if (isMobile) {
+      setMobileConversationView("detail");
+    }
   };
 
   // 搜索结果点击
@@ -922,7 +995,9 @@ function InboxContent() {
     if (activeChannel !== "wechat") return;
     if (!activeConversationId) return;
 
-    const conv = allConversations.find((c) => c.id === activeConversationId);
+    const conv = allConversations.find(
+      (c) => c.id === activeConversationId
+    );
     if (!conv || conv.channel !== "wechat") return;
 
     const convId = activeConversationId;
@@ -935,7 +1010,7 @@ function InboxContent() {
       (conv as any).isH5 === true ||
       (typeof externalUserId === "string" &&
         (externalUserId.startsWith("h5:") ||
-         externalUserId.startsWith("wxh5:")));
+          externalUserId.startsWith("wxh5:")));
 
     let stopped = false;
 
@@ -944,7 +1019,9 @@ function InboxContent() {
         if (isH5WeChat) {
           // ⭐ H5 via WeChat：走 H5 API
           const resp = await fetch(
-            `/api/h5/sessions/${encodeURIComponent(convId)}/messages?take=100`
+            `/api/h5/sessions/${encodeURIComponent(
+              convId
+            )}/messages?take=100`
           );
           const data = await resp.json();
           if (!stopped && data?.ok && Array.isArray(data.messages)) {
@@ -966,7 +1043,9 @@ function InboxContent() {
               timestamp:
                 typeof m.timestamp === "number"
                   ? m.timestamp
-                  : new Date(m.timestamp || Date.now()).getTime(),
+                  : new Date(
+                      m.timestamp || Date.now()
+                    ).getTime(),
             }));
 
             setMessagesState((prev) => ({
@@ -979,7 +1058,9 @@ function InboxContent() {
           const resp = await fetch(
             `/api/wecom/sessions/${encodeURIComponent(
               externalUserId
-            )}/messages?open_kfid=${encodeURIComponent(OPEN_KFID)}&take=50`,
+            )}/messages?open_kfid=${encodeURIComponent(
+              OPEN_KFID
+            )}&take=50`,
             { headers: { "x-admin-token": ADMIN } }
           );
           const data = await resp.json();
@@ -1014,7 +1095,9 @@ function InboxContent() {
     if (activeChannel !== "webchat") return;
     if (!activeConversationId) return;
 
-    const conv = allConversations.find((c) => c.id === activeConversationId);
+    const conv = allConversations.find(
+      (c) => c.id === activeConversationId
+    );
     if (!conv || conv.channel !== "webchat") return;
 
     const convId = activeConversationId;
@@ -1023,7 +1106,9 @@ function InboxContent() {
     const fetchMessages = async () => {
       try {
         const resp = await fetch(
-          `/api/h5/sessions/${encodeURIComponent(convId)}/messages?take=100`
+          `/api/h5/sessions/${encodeURIComponent(
+            convId
+          )}/messages?take=100`
         );
         const data = await resp.json();
         if (!stopped && data?.ok && Array.isArray(data.messages)) {
@@ -1045,7 +1130,9 @@ function InboxContent() {
             timestamp:
               typeof m.timestamp === "number"
                 ? m.timestamp
-                : new Date(m.timestamp || Date.now()).getTime(),
+                : new Date(
+                    m.timestamp || Date.now()
+                  ).getTime(),
           }));
 
           setMessagesState((prev) => ({
@@ -1085,7 +1172,7 @@ function InboxContent() {
         (conv as any).isH5 === true ||
         (typeof externalUserId === "string" &&
           (externalUserId.startsWith("h5:") ||
-           externalUserId.startsWith("wxh5:")));
+            externalUserId.startsWith("wxh5:")));
 
       if (isH5WeChat) {
         // ⭐ H5 via WeChat：走 H5 發送，讓 /vip-chat 也能看到
@@ -1158,7 +1245,10 @@ function InboxContent() {
 
     setMessagesState((prev) => ({
       ...prev,
-      [conversationId]: [...(prev[conversationId] || []), newMessage],
+      [conversationId]: [
+        ...(prev[conversationId] || []),
+        newMessage,
+      ],
     }));
   };
 
@@ -1166,6 +1256,236 @@ function InboxContent() {
     console.log("Close conversation");
   };
 
+  const chatChannels: InboxChannel[] = [
+    "wechat",
+    "whatsapp",
+    "webchat",
+    "line",
+  ];
+
+  // 🟡 手机端：列表 / 详情 + 底部输入框 + 左下角悬浮菜单
+  if (isMobile) {
+    const mobileMenuItems: {
+      key: string;
+      label: string;
+      onClick: () => void;
+    }[] = [
+      {
+        key: "chat",
+        label: "Chat",
+        onClick: () => {
+          if (!chatChannels.includes(activeChannel)) {
+            handleChannelSelect("wechat");
+          } else {
+            handleChannelSelect(activeChannel);
+          }
+          setMobileMenuOpen(false);
+        },
+      },
+      {
+        key: "email",
+        label: "E-Mail",
+        onClick: () => {
+          handleChannelSelect("email");
+          setMobileMenuOpen(false);
+        },
+      },
+      {
+        key: "mobile",
+        label: "Mobile",
+        onClick: () => {
+          handleChannelSelect("phone");
+          setMobileMenuOpen(false);
+        },
+      },
+      {
+        key: "contacts",
+        label: "Contact",
+        onClick: () => {
+          handleChannelSelect("vipContacts");
+          setMobileMenuOpen(false);
+        },
+      },
+      {
+        key: "requests",
+        label: "Requests",
+        onClick: () => {
+          handleChannelSelect("vipRequests");
+          setMobileMenuOpen(false);
+        },
+      },
+    ];
+
+    const showChannelTabs =
+      chatChannels.includes(activeChannel) &&
+      mobileConversationView === "list";
+
+    return (
+      <AppShell>
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <AppHeader />
+
+          {/* 主内容：按 channel 决定是 VIP 视图还是 Chat 视图 */}
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {activeChannel === "vipRequests" ? (
+              <VipRequestsView
+                onPendingCountChange={setVipPendingCount}
+              />
+            ) : activeChannel === "vipContacts" ? (
+              <VipListView />
+            ) : (
+              <>
+                {/* Chat 顶部的渠道 tab（只在列表页显示，在对话页隐藏） */}
+                {showChannelTabs && (
+                  <div
+                    className="flex px-4 pt-3 pb-2 border-b"
+                    style={{ borderColor: "var(--divider)" }}
+                  >
+                    {chatChannels.map((ch) => (
+                      <button
+                        key={ch}
+                        type="button"
+                        onClick={() => handleChannelSelect(ch)}
+                        className="mr-6 pb-1 text-sm font-medium relative"
+                        style={{
+                          color:
+                            activeChannel === ch
+                              ? "var(--text-primary)"
+                              : "var(--text-secondary)",
+                        }}
+                      >
+                        {ch === "wechat"
+                          ? "Wechat"
+                          : ch === "whatsapp"
+                          ? "WhatsApp"
+                          : ch === "webchat"
+                          ? "Web"
+                          : "Line"}
+                        {activeChannel === ch && (
+                          <span
+                            className="absolute left-0 right-0 -bottom-0.5 h-[2px]"
+                            style={{ backgroundColor: "var(--accent)" }}
+                          />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {mobileConversationView === "list" ? (
+                  // 会话列表页（占满全屏）
+                  <ConversationListPanel
+                    conversations={visibleConversations}
+                    activeConversationId={activeConversationId}
+                    onConversationSelect={handleConversationSelect}
+                    searchQuery={searchQuery}
+                    onSearchChange={setSearchQuery}
+                    messagesState={messagesState}
+                    searchResults={searchResults}
+                    onSearchResultSelect={handleSearchResultSelect}
+                  />
+                ) : (
+                  // 会话详情页：ChatPanel 占满，输入框自然在底部
+                  <div className="flex-1 flex flex-col overflow-hidden relative">
+                    {/* 返回按钮：放在聊天区左上角 */}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setMobileConversationView("list")
+                      }
+                      className="absolute z-20 top-3 left-3 p-1 rounded-full bg-white/90 shadow"
+                    >
+                      <span
+                        className="inline-block border-l-2 border-b-2 w-3 h-3 rotate-45"
+                        style={{ borderColor: "var(--text-primary)" }}
+                      />
+                    </button>
+
+                    <ChatPanel
+                      conversation={activeConversation}
+                      messages={activeMessages}
+                      onSendMessage={handleSendMessage}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
+          {/* 左下角悬浮 hamburger 菜单 */}
+          <button
+            type="button"
+            onClick={() => setMobileMenuOpen(true)}
+            className="fixed bottom-6 left-4 z-30 rounded-full shadow-lg p-6 bg-white"
+          >
+            <div className="flex flex-col gap-[3px]">
+              <span
+                className="w-4 h-[2px] rounded-full"
+                style={{ backgroundColor: "var(--text-primary)" }}
+              />
+              <span
+                className="w-4 h-[2px] rounded-full"
+                style={{ backgroundColor: "var(--text-primary)" }}
+              />
+              <span
+                className="w-4 h-[2px] rounded-full"
+                style={{ backgroundColor: "var(--text-primary)" }}
+              />
+            </div>
+          </button>
+
+          {/* 抽屉菜单 */}
+          {mobileMenuOpen && (
+            <div className="fixed inset-0 z-40 flex">
+              <div className="w-64 max-w-[75%] h-full bg-white shadow-xl flex flex-col">
+                <div
+                  className="px-4 py-4 border-b flex items-center justify-between"
+                  style={{ borderColor: "var(--divider)" }}
+                >
+                  <span
+                    className="text-sm font-semibold"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    Menu
+                  </span>
+                  <button
+                    type="button"
+                    className="text-xl"
+                    style={{ color: "var(--text-secondary)" }}
+                    onClick={() => setMobileMenuOpen(false)}
+                  >
+                    ×
+                  </button>
+                </div>
+
+                <nav className="flex-1 py-2">
+                  {mobileMenuItems.map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={item.onClick}
+                      className="w-full flex items-center px-5 py-3 text-left text-sm"
+                      style={{ color: "var(--text-primary)" }}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </nav>
+              </div>
+
+              <button
+                type="button"
+                className="flex-1 bg-black/30"
+                onClick={() => setMobileMenuOpen(false)}
+              />
+            </div>
+          )}
+        </div>
+      </AppShell>
+    );
+  }
+
+  // 🟢 PC 端：保持你之前的三栏布局完全不变
   return (
     <AppShell>
       <LeftChannelRail
@@ -1177,7 +1497,7 @@ function InboxContent() {
       {/* 右側主區域：上面是 Header，下面根據 channel 切換內容 */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <AppHeader />
-          <div className="flex-1 flex overflow-hidden">
+        <div className="flex-1 flex overflow-hidden">
           {activeChannel === "vipRequests" ? (
             // 左侧选中「VIP Requests」：走审批视图
             <VipRequestsView onPendingCountChange={setVipPendingCount} />
