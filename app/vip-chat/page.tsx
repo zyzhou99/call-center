@@ -201,7 +201,7 @@ export default function VipChatPage() {
       }
 
       void sendAutoReply(
-        "您好，这里是永利皇宫 VIP 礼宾团队，我们已经收到您的信息，将尽快为您安排专人回复。"
+        "尊敬的贵宾，当前正值服务高峰，请您稍等片刻，我们将尽快为您服务。"
       );
 
       autoReplyTimerRef.current = null;

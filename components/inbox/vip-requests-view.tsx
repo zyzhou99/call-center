@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react"; // ⭐ 新增 useRef
 import { cn } from "@/lib/utils";
 
 type VipRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
@@ -50,6 +50,8 @@ type ChannelFilter = "ALL" | "wechat" | "browser";
 
 interface VipRequestsViewProps {
   onPendingCountChange?: (count: number) => void;
+  // ⭐ 新增：當偵測到「有新的 Pending request」時，通知外層（比如 inbox 彈窗）
+  onNewPendingRequest?: (latestPending: VipRequestItem) => void;
 }
 
 // ------ helpers ------
@@ -104,7 +106,10 @@ const getStatusChipStyle = (status: VipRequestStatus) => {
   }
 };
 
-export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) {
+export function VipRequestsView({
+  onPendingCountChange,
+  onNewPendingRequest, // ⭐ 新增
+}: VipRequestsViewProps) {
   const [requests, setRequests] = useState<VipRequestItem[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
 
@@ -121,6 +126,9 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
 
   // ⭐ 手機端列表 / 詳情視圖切換，只影響 < md
   const [mobileView, setMobileView] = useState<"list" | "detail">("list");
+
+  // ⭐ 新增：記錄「目前已知的最新 Pending request 的 createdAt」
+  const lastPendingCreatedAtRef = useRef<number | null>(null);
 
   // ------- data fetching -------
 
@@ -162,8 +170,33 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
           return next;
         });
 
-        const pendingCount = list.filter((r) => r.status === "PENDING").length;
+        // ⭐ 1) 更新 Pending 數量（原有邏輯）
+        const pendingList = list.filter((r) => r.status === "PENDING");
+        const pendingCount = pendingList.length;
         onPendingCountChange?.(pendingCount);
+
+        // ⭐ 2) 檢測是否有「新的 Pending request」
+        // list 已經按 createdAt desc 排序，所以 pendingList[0] 就是最新
+        if (pendingList.length > 0) {
+          const latest = pendingList[0];
+          const latestTs = new Date(latest.createdAt).getTime();
+          if (!Number.isNaN(latestTs)) {
+            const prev = lastPendingCreatedAtRef.current;
+
+            if (prev === null) {
+              // 第一次有數據：只做 baseline，不觸發彈窗（避免一打開頁面就被舊數據轟炸）
+              lastPendingCreatedAtRef.current = latestTs;
+            } else if (latestTs > prev) {
+              // 出現了時間更晚的 Pending，代表有新申請
+              lastPendingCreatedAtRef.current = latestTs;
+              // 通知外層（inbox）可以彈出提示窗
+              onNewPendingRequest?.(latest);
+            }
+          }
+        } else {
+          // 沒有 Pending 了，重置 baseline
+          lastPendingCreatedAtRef.current = null;
+        }
 
         return list;
       } catch (e) {
@@ -179,7 +212,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
         setActionLoadingId(null);
       }
     },
-    [onPendingCountChange]
+    [onPendingCountChange, onNewPendingRequest] // ⭐ 記得把新回調放進依賴
   );
 
   // 首次加载

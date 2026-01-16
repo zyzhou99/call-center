@@ -111,6 +111,9 @@ function InboxContent() {
   const [searchQuery, setSearchQuery] = useState("");
   const [vipPendingCount, setVipPendingCount] = useState(0);
 
+  // ⭐ 新增：是否显示「新 VIP 请求」弹窗
+  const [showVipRequestPopup, setShowVipRequestPopup] = useState(false);
+
   // mock 会话（非微信、非 webchat 实会话）
   const [mockConvs, setMockConvs] =
     useState<Conversation[]>(mockConversations);
@@ -150,6 +153,10 @@ function InboxContent() {
   // H5 / webchat 未读快照
   const h5ServerUnreadsRef = useRef<Record<string, number>>({});
   const h5UnreadBaseRef = useRef<Record<string, number>>({});
+
+  // ⭐ 新增：VIP Pending 变化检测（用于新请求弹窗）
+  const vipPendingInitializedRef = useRef(false);
+  const lastVipPendingCountRef = useRef(0);
 
   // URL 里带进来的 sessionId（来自 /vip-access 跳转，目前用于 wechat）
   const sessionIdFromUrl = searchParams.get("sessionId");
@@ -270,7 +277,7 @@ function InboxContent() {
     })();
   }, [sessionIdFromUrl, isMobile]);
 
-  // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点
+  // 🔔 顶层轮询 VIP Pending 数量，用于左侧 VIP Requests 小红点 + 新请求弹窗
   useEffect(() => {
     let timer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -290,6 +297,20 @@ function InboxContent() {
         ).length;
 
         setVipPendingCount(pending);
+
+        // ⭐ 首次轮询只记录基线，不弹窗
+        if (!vipPendingInitializedRef.current) {
+          vipPendingInitializedRef.current = true;
+          lastVipPendingCountRef.current = pending;
+          return;
+        }
+
+        // ⭐ 之后每次，只要 PENDING 数量上升，就视为有新请求 → 弹出提示
+        if (pending > lastVipPendingCountRef.current) {
+          setShowVipRequestPopup(true);
+        }
+
+        lastVipPendingCountRef.current = pending;
       } catch (e) {
         console.error("fetch vip pending count failed:", e);
       }
@@ -1267,6 +1288,69 @@ function InboxContent() {
     "line",
   ];
 
+  // ⭐ 小组件：统一的 VIP 请求弹窗卡片内容
+  const VipRequestPopupCard = () => (
+    <div className="w-full max-w-sm rounded-2xl shadow-xl border border-[#e6dfd2] bg-white px-4 py-3">
+      <div className="flex items-start gap-3">
+        <div className="mt-0.5">
+          <div className="w-9 h-9 rounded-full bg-[#f7ecdb] flex items-center justify-center">
+            <InboxIcon className="w-4 h-4" style={{ color: "#a1732a" }} />
+          </div>
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="text-sm font-semibold text-[#3a3023]">
+                有新的 VIP 接入申请
+              </p>
+              <p className="mt-1 text-xs text-[#6e5842]">
+                有客人通过通用二维码发起接入请求。
+              </p>
+              {vipPendingCount > 0 && (
+                <p className="mt-1 text-[11px] text-[#9a856a]">
+                  当前待处理请求：{vipPendingCount} 条
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowVipRequestPopup(false)}
+              className="p-1 rounded-full hover:bg-black/5 flex-shrink-0"
+            >
+              <CloseIcon
+                className="w-3 h-3"
+                style={{ color: "#a79a86" }}
+              />
+            </button>
+          </div>
+          <div className="mt-3 flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setShowVipRequestPopup(false)}
+              className="px-3 py-1.5 rounded-full text-xs border border-[#e0d6c6] text-[#6e5842] bg-white hover:bg-[#faf7f2]"
+            >
+              稍后处理
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowVipRequestPopup(false);
+                handleChannelSelect("vipRequests");
+              }}
+              className="px-3 py-1.5 rounded-full text-xs font-medium text-[#3a3023]"
+              style={{
+                background:
+                  "linear-gradient(135deg, #f5e0b6 0%, #e3c38f 50%, #d3ab67 100%)",
+              }}
+            >
+              查看请求
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
   // 🟡 手机端：列表 / 详情 + 底部输入框 + 左下角 Wynn 风格悬浮菜单
   if (isMobile) {
     const mobileMenuItems = [
@@ -1439,6 +1523,10 @@ function InboxContent() {
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <VipRequestsView
                   onPendingCountChange={setVipPendingCount}
+                  onNewPendingRequest={() => {
+                    // 有新的 Pending 申請時，打開你已經做好的彈窗
+                    setShowVipRequestPopup(true);
+                  }}
                 />
               </div>
             ) : activeChannel === "vipContacts" ? (
@@ -1528,9 +1616,7 @@ function InboxContent() {
                     />
                   </div>
                 ) : (
-                  // 👉 会话详情页：
-                  //    - header 固定在 AppHeader 下方（由 ChatPanel 自己处理）
-                  //    - 点击现有 header 里的头像，展开右侧 VIP info panel
+                  // 👉 会话详情页
                   <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
                     <ChatPanel
                       conversation={activeConversation}
@@ -1540,9 +1626,9 @@ function InboxContent() {
                         setMobileConversationView("list");
                         setMobileProfileOpen(false);
                       }}
-                      // ⭐ 新增：让 ChatPanel 里【现有】头像点击时，打开 VIP 资料侧栏
-                      onHeaderAvatarClick={() => setMobileProfileOpen(true)}
-                      // ⭐ 新增：让 ChatPanel 把 header 设为 sticky
+                      onHeaderAvatarClick={() =>
+                        setMobileProfileOpen(true)
+                      }
                       stickyHeader
                     />
 
@@ -1682,6 +1768,15 @@ function InboxContent() {
             </div>
           )}
         </div>
+
+        {/* ⭐ 手机端：新 VIP 请求提示弹窗（底部中间） */}
+        {showVipRequestPopup && (
+          <div className="fixed inset-x-0 bottom-4 z-40 flex justify-center pointer-events-none">
+            <div className="pointer-events-auto mx-4">
+              <VipRequestPopupCard />
+            </div>
+          </div>
+        )}
       </AppShell>
     );
   }
@@ -1699,7 +1794,12 @@ function InboxContent() {
         <AppHeader />
         <div className="flex-1 flex overflow-hidden">
           {activeChannel === "vipRequests" ? (
-            <VipRequestsView onPendingCountChange={setVipPendingCount} />
+            <VipRequestsView
+              onPendingCountChange={setVipPendingCount}
+              onNewPendingRequest={() => {
+                setShowVipRequestPopup(true);
+              }}
+            />
           ) : activeChannel === "vipContacts" ? (
             <VipListView />
           ) : (
@@ -1733,6 +1833,13 @@ function InboxContent() {
           )}
         </div>
       </div>
+
+      {/* ⭐ PC 端：新 VIP 请求提示弹窗（右下角） */}
+      {showVipRequestPopup && (
+        <div className="fixed bottom-6 right-6 z-40">
+          <VipRequestPopupCard />
+        </div>
+      )}
     </AppShell>
   );
 }
