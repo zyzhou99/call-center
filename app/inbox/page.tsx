@@ -48,7 +48,7 @@ const OPEN_KFID = "wkF2d-UgAAEh3wgchi7suzX_aSxSTynw";
 const ADMIN = "sync123";
 const CHANNEL_STORAGE_KEY = "cc_active_channel";
 
-// ⭐ 新增：未讀基線存儲 key
+// ⭐ 未讀基線存儲 key
 const WECOM_UNREAD_BASE_STORAGE_KEY = "cc_wecom_unread_base";
 const H5_UNREAD_BASE_STORAGE_KEY = "cc_h5_unread_base";
 
@@ -71,6 +71,8 @@ function InboxContent() {
   const [mobileConversationView, setMobileConversationView] =
     useState<"list" | "detail">("list"); // 列表 / 详情
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false); // 左下角菜单是否打开
+  // ⭐ 新增：手機端 VIP 資訊面板開關
+  const [mobileProfileOpen, setMobileProfileOpen] = useState(false);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -81,6 +83,28 @@ function InboxContent() {
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
+
+  // ⭐ 新增：手機端進入 Inbox 時強制寬度 100vw，防止從 login 放大狀態帶過來
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!isMobile) return;
+
+    const body = document.body;
+    const prevWidth = body.style.width;
+    const prevMaxWidth = body.style.maxWidth;
+    const prevOverflowX = body.style.overflowX;
+
+    body.style.width = "100vw";
+    body.style.maxWidth = "100vw";
+    body.style.overflowX = "hidden";
+    window.scrollTo(0, 0);
+
+    return () => {
+      body.style.width = prevWidth;
+      body.style.maxWidth = prevMaxWidth;
+      body.style.overflowX = prevOverflowX;
+    };
+  }, [isMobile]);
 
   const [activeChannel, setActiveChannel] =
     useState<InboxChannel>("wechat");
@@ -186,9 +210,10 @@ function InboxContent() {
     if (typeof window !== "undefined") {
       window.localStorage.setItem(CHANNEL_STORAGE_KEY, String(channel));
     }
-    // 手机端切换 channel 时，回到会话列表视图
+    // 手机端切换 channel 时，回到会话列表视图，同时關閉 VIP 面板
     if (isMobile) {
       setMobileConversationView("list");
+      setMobileProfileOpen(false);
     }
   };
 
@@ -336,8 +361,6 @@ function InboxContent() {
           serverUnreads[conv.id] = rawUnread;
 
           if (!(conv.id in base)) {
-            // 🆕 第一次看到这个会话：把「当前服务器未读」当成已读基线
-            // 以后只有 rawUnread 往上长出来的部分才算「新未读」
             base[conv.id] = rawUnread;
           }
         });
@@ -345,7 +368,6 @@ function InboxContent() {
         wecomServerUnreadsRef.current = serverUnreads;
         wecomUnreadBaseRef.current = base;
 
-        // 持久化一下基线，刷新页面时还能对得上
         if (typeof window !== "undefined") {
           try {
             window.localStorage.setItem(
@@ -376,7 +398,6 @@ function InboxContent() {
       }
     };
 
-    // 始终后台轮询 WeCom 会话
     fetchSessions();
     timer = setInterval(fetchSessions, 5000);
 
@@ -384,7 +405,7 @@ function InboxContent() {
       stopped = true;
       if (timer) clearInterval(timer);
     };
-  }, []); // ✅ 不再依赖 activeConversationId
+  }, []);
 
   // 加载 + 轮询 H5 / webchat 会话列表（瀏覽器 H5）
   useEffect(() => {
@@ -404,7 +425,6 @@ function InboxContent() {
           ...h5UnreadBaseRef.current,
         };
 
-        // 拆成兩份：webchat 用於 WebChat tab，wechat(H5) 用於 WeChat tab
         const webchatConvs: Conversation[] = [];
         const wechatH5Convs: Conversation[] = [];
 
@@ -414,7 +434,6 @@ function InboxContent() {
           serverUnreads[id] = rawUnread;
 
           if (!(id in base)) {
-            // 第一次看到這個 H5 會話，用 server 未讀作為基線（第一次不亮紅點）
             base[id] = rawUnread;
           }
 
@@ -427,11 +446,9 @@ function InboxContent() {
           const baseUnread = base[id] || 0;
           let effectiveUnread = Math.max(0, rawUnread - baseUnread);
 
-          // 後端帶回的 channel: "wechat" 或 "webchat"
           const ch: Channel =
             s.channel === "wechat" ? "wechat" : "webchat";
 
-          // 正在打開的對話，未讀顯示為 0
           if (activeChannel === ch && id === activeConversationId) {
             effectiveUnread = 0;
           }
@@ -450,7 +467,7 @@ function InboxContent() {
           (conv as any).vipGuest = vipGuest;
           (conv as any).vipNumber = s.vipNumber;
           (conv as any).lastMsgAt = lastMsgAt;
-          (conv as any).isH5 = true; // ✅ 標記：這是一個 H5 來源的會話
+          (conv as any).isH5 = true;
 
           if (ch === "wechat") {
             wechatH5Convs.push(conv);
@@ -473,9 +490,7 @@ function InboxContent() {
           }
         }
 
-        // WebChat tab 用
         setH5Conversations(webchatConvs);
-        // WeChat tab 裡「H5 via WeChat」用
         setH5WeChatConversations(wechatH5Convs);
       } catch (e) {
         console.error("load h5 sessions failed:", e);
@@ -491,12 +506,11 @@ function InboxContent() {
     };
   }, [activeChannel, activeConversationId]);
 
-  // 当前要展示的会话源：按照当前 channel 拆分（vipRequests 在这里不会进来）
+  // 当前要展示的会话源：按照当前 channel 拆分
   const visibleConversations = useMemo(() => {
     let base: Conversation[];
 
     if (activeChannel === "wechat") {
-      // ✅ 真 WeCom + H5 via WeChat 一起顯示
       base = [...wecomConversations, ...h5WeChatConversations];
     } else if (activeChannel === "webchat") {
       base = h5Conversations;
@@ -550,27 +564,20 @@ function InboxContent() {
       vipContacts: 0,
     };
 
-    // mock
     mockConvs.forEach((conv) => {
-      // ❌ webchat 用實際會話，不算 mock
       if (conv.channel === "webchat") return;
-      // ❌ wechat 現在也走實際會話，不要再用 mock 的未讀來干擾左側紅點
       if (conv.channel === "wechat") return;
-
       counts[conv.channel] += conv.unreadCount;
     });
 
-    // 真 WeCom 會話 → Wechat 累加
     wecomConversations.forEach((conv) => {
       counts.wechat += conv.unreadCount;
     });
 
-    // H5 / webchat 會話 → Webchat 累加
     h5Conversations.forEach((conv) => {
       counts.webchat += conv.unreadCount;
     });
 
-    // ✅ H5 via WeChat 會話 → Wechat 也要算！
     h5WeChatConversations.forEach((conv) => {
       counts.wechat += conv.unreadCount;
     });
@@ -580,7 +587,7 @@ function InboxContent() {
     mockConvs,
     wecomConversations,
     h5Conversations,
-    h5WeChatConversations, // ✅ 記得把它也放進依賴
+    h5WeChatConversations,
     vipPendingCount,
   ]);
 
@@ -670,10 +677,13 @@ function InboxContent() {
   // 选会话
   const handleConversationSelect = async (conversationId: string) => {
     setActiveConversationId(conversationId);
+    // 切換會話時順便關閉手機端 VIP 面板
+    if (isMobile) {
+      setMobileProfileOpen(false);
+    }
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // 微信渠道：从后端拉消息 + 清未读 + 拉 VIP Profile
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
@@ -687,7 +697,6 @@ function InboxContent() {
             externalUserId.startsWith("wxh5:")));
 
       if (isH5WeChat) {
-        // ✅ H5 via WeChat：走 H5 API 拉消息
         try {
           const resp = await fetch(
             `/api/h5/sessions/${encodeURIComponent(
@@ -725,7 +734,6 @@ function InboxContent() {
             }));
           }
 
-          // ✅ 這裡用「H5 的未讀基線」，而不是 WeCom 的
           const serverUnreads = h5ServerUnreadsRef.current;
           h5UnreadBaseRef.current = {
             ...h5UnreadBaseRef.current,
@@ -746,7 +754,6 @@ function InboxContent() {
             }
           }
 
-          // ⭐ 新增：同步把 WeCom 那邊的未讀基線也設成「當前值」
           const wecomServerUnreads = wecomServerUnreadsRef.current;
           wecomUnreadBaseRef.current = {
             ...wecomUnreadBaseRef.current,
@@ -768,14 +775,12 @@ function InboxContent() {
             }
           }
 
-          // ⭐ 新增：把 wecomConversations 裡這條會話的未讀也清零
           setWecomConversations((prev) =>
             prev.map((c) =>
               c.id === conversationId ? { ...c, unreadCount: 0 } : c
             )
           );
 
-          // 把「H5 via WeChat」這條會話的 unreadCount 清零
           setH5WeChatConversations((prev) =>
             prev.map((c) =>
               c.id === conversationId ? { ...c, unreadCount: 0 } : c
@@ -785,7 +790,6 @@ function InboxContent() {
           console.error("load h5 (wechat) messages failed:", e);
         }
       } else {
-        // ✅ 真 WeCom 會話：走 WeCom API + WeCom 的未讀基線
         try {
           const resp = await fetch(
             `/api/wecom/sessions/${encodeURIComponent(
@@ -834,7 +838,6 @@ function InboxContent() {
         }
       }
 
-      // ⭐ 先用會話自帶的 vipGuest 做一個「快速」Profile（先顯示名字）
       const vipGuest = (conv as any).vipGuest;
       if (vipGuest) {
         const profileFromSession: GuestProfile = {
@@ -850,7 +853,6 @@ function InboxContent() {
         setActiveProfile(null);
       }
 
-      // ⭐ 再調一次後端 Profile，拿到完整的 preference / restriction 等欄位
       try {
         const resp = await fetch(
           `/api/vip/profile/${encodeURIComponent(conversationId)}`
@@ -870,7 +872,6 @@ function InboxContent() {
       return;
     }
 
-    // H5 / webchat 渠道
     if (conv?.channel === "webchat") {
       try {
         const resp = await fetch(
@@ -1028,7 +1029,6 @@ function InboxContent() {
     const fetchMessages = async () => {
       try {
         if (isH5WeChat) {
-          // ⭐ H5 via WeChat：走 H5 API
           const resp = await fetch(
             `/api/h5/sessions/${encodeURIComponent(
               convId
@@ -1065,7 +1065,6 @@ function InboxContent() {
             }));
           }
         } else {
-          // ⭐ 真 WeCom 會話：走 wecom API
           const resp = await fetch(
             `/api/wecom/sessions/${encodeURIComponent(
               externalUserId
@@ -1172,7 +1171,6 @@ function InboxContent() {
 
     const conv = allConversations.find((c) => c.id === conversationId);
 
-    // 微信渠道：分 H5 via WeChat & 真 WeCom 兩種
     if (conv?.channel === "wechat") {
       const externalUserId =
         (conv as any).externalUserId ||
@@ -1186,7 +1184,6 @@ function InboxContent() {
             externalUserId.startsWith("wxh5:")));
 
       if (isH5WeChat) {
-        // ⭐ H5 via WeChat：走 H5 發送，讓 /vip-chat 也能看到
         try {
           await fetch(
             `/api/h5/sessions/${encodeURIComponent(
@@ -1202,7 +1199,6 @@ function InboxContent() {
           console.error("send h5 (wechat) message failed:", e);
         }
       } else {
-        // ⭐ 真 WeCom：走企業微信客服發送
         try {
           await fetch("/api/wecom/kf/send", {
             method: "POST",
@@ -1218,11 +1214,9 @@ function InboxContent() {
         }
       }
 
-      // wechat 模式下不做樂觀更新，等輪詢把真實消息拉回來
       return;
     }
 
-    // H5 / webchat 渠道：走自己的 API，交給輪詢更新
     if (conv?.channel === "webchat") {
       try {
         await fetch(
@@ -1241,7 +1235,6 @@ function InboxContent() {
       return;
     }
 
-    // 其它渠道（mock）
     const newMessage: Message = {
       id: `m${Date.now()}`,
       conversationId,
@@ -1267,7 +1260,7 @@ function InboxContent() {
     console.log("Close conversation");
   };
 
-    const chatChannels: InboxChannel[] = [
+  const chatChannels: InboxChannel[] = [
     "wechat",
     "whatsapp",
     "webchat",
@@ -1276,7 +1269,6 @@ function InboxContent() {
 
   // 🟡 手机端：列表 / 详情 + 底部输入框 + 左下角 Wynn 风格悬浮菜单
   if (isMobile) {
-    // menu 配置：只改 UI，不改 onClick 的逻辑
     const mobileMenuItems = [
       {
         key: "chat",
@@ -1329,7 +1321,6 @@ function InboxContent() {
       },
     ] as const;
 
-    // 当前高亮哪一行：Chat / E-Mail / Mobile / Contact / Requests
     const activeMenuKey: (typeof mobileMenuItems)[number]["key"] =
       chatChannels.includes(activeChannel)
         ? "chat"
@@ -1343,7 +1334,6 @@ function InboxContent() {
         ? "requests"
         : "chat";
 
-    // 每个菜单的红点数量
     const chatUnread =
       unreadCounts.wechat +
       unreadCounts.whatsapp +
@@ -1363,7 +1353,6 @@ function InboxContent() {
       return 0;
     };
 
-    // 每个菜单行左侧的小图标（不用 emoji）
     const renderMenuIcon = (
       key: (typeof mobileMenuItems)[number]["key"],
       isActive: boolean
@@ -1390,7 +1379,6 @@ function InboxContent() {
       chatChannels.includes(activeChannel) &&
       mobileConversationView === "list";
 
-    // 渲染 Wynn 风格的一条菜单行
     const renderMenuItem = (item: (typeof mobileMenuItems)[number]) => {
       const isActive = item.key === activeMenuKey;
       const badgeCount = getMenuBadgeCount(item.key);
@@ -1441,59 +1429,87 @@ function InboxContent() {
 
     return (
       <AppShell>
-        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
+        {/* ⭐ 這裡加上 w-screen / max-w-[100vw]，配合上面的 body hack */}
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0 w-screen max-w-[100vw]">
           <AppHeader />
 
           {/* 主内容：按 channel 决定是 VIP 视图还是 Chat 视图 */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {activeChannel === "vipRequests" ? (
-              // 👉 VIP Requests 整页可滚动
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <VipRequestsView
                   onPendingCountChange={setVipPendingCount}
                 />
               </div>
             ) : activeChannel === "vipContacts" ? (
-              // 👉 VIP Contacts 整页可滚动
               <div className="flex-1 min-h-0 overflow-y-auto">
                 <VipListView />
               </div>
             ) : (
               <>
-                {/* Chat 顶部的渠道 tab（只在列表页显示，在对话页隐藏） */}
+                {/* ⭐ 顶部渠道 tab：增加每个 channel 的未读小红点 */}
                 {showChannelTabs && (
                   <div
                     className="flex px-4 pt-3 pb-2 border-b"
                     style={{ borderColor: "var(--divider)" }}
                   >
-                    {chatChannels.map((ch) => (
-                      <button
-                        key={ch}
-                        type="button"
-                        onClick={() => handleChannelSelect(ch)}
-                        className="mr-6 pb-1 text-sm font-medium relative"
-                        style={{
-                          color:
-                            activeChannel === ch
-                              ? "var(--text-primary)"
-                              : "var(--text-secondary)",
-                        }}
-                      >
-                        {ch === "wechat"
+                    {chatChannels.map((ch) => {
+                      const channelUnread =
+                        ch === "wechat"
+                          ? unreadCounts.wechat
+                          : ch === "whatsapp"
+                          ? unreadCounts.whatsapp
+                          : ch === "webchat"
+                          ? unreadCounts.webchat
+                          : unreadCounts.line;
+
+                      const label =
+                        ch === "wechat"
                           ? "Wechat"
                           : ch === "whatsapp"
                           ? "WhatsApp"
                           : ch === "webchat"
                           ? "Web"
-                          : "Line"}
-                        {activeChannel === ch && (
-                          <span
-                            className="absolute left-0 right-0 -bottom-0.5 h-[2px]"
-                            style={{ backgroundColor: "var(--accent)" }}
-                          />
-                        )}
-                      </button>
-                    ))}
+                          : "Line";
+
+                      return (
+                        <button
+                          key={ch}
+                          type="button"
+                          onClick={() => handleChannelSelect(ch)}
+                          className="mr-6 pb-1 text-sm font-medium relative"
+                          style={{
+                            color:
+                              activeChannel === ch
+                                ? "var(--text-primary)"
+                                : "var(--text-secondary)",
+                          }}
+                        >
+                          <span className="inline-flex items-center gap-1">
+                            <span>{label}</span>
+                            {channelUnread > 0 && (
+                              <span
+                                className="inline-flex items-center justify-center min-w-[16px] h-4 rounded-full text-[10px] font-medium"
+                                style={{
+                                  backgroundColor: "#f9735b",
+                                  color: "#ffffff",
+                                }}
+                              >
+                                {channelUnread > 99
+                                  ? "99+"
+                                  : channelUnread}
+                              </span>
+                            )}
+                          </span>
+                          {activeChannel === ch && (
+                            <span
+                              className="absolute left-0 right-0 -bottom-0.5 h-[2px]"
+                              style={{ backgroundColor: "var(--accent)" }}
+                            />
+                          )}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
 
@@ -1512,16 +1528,52 @@ function InboxContent() {
                     />
                   </div>
                 ) : (
-                  // 👉 会话详情页
+                  // 👉 会话详情页：
+                  //    - header 固定在 AppHeader 下方（由 ChatPanel 自己处理）
+                  //    - 点击现有 header 里的头像，展开右侧 VIP info panel
                   <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
                     <ChatPanel
                       conversation={activeConversation}
                       messages={activeMessages}
                       onSendMessage={handleSendMessage}
-                      onMobileBack={() =>
-                        setMobileConversationView("list")
-                      }
+                      onMobileBack={() => {
+                        setMobileConversationView("list");
+                        setMobileProfileOpen(false);
+                      }}
+                      // ⭐ 新增：让 ChatPanel 里【现有】头像点击时，打开 VIP 资料侧栏
+                      onHeaderAvatarClick={() => setMobileProfileOpen(true)}
+                      // ⭐ 新增：让 ChatPanel 把 header 设为 sticky
+                      stickyHeader
                     />
+
+                    {activeProfile && (
+                      <>
+                        {/* 滑出 VIP 信息 Panel，寬度 75% */}
+                        <div
+                          className={cn(
+                            "absolute inset-y-0 right-0 z-30 bg-[#f9f8f6] shadow-2xl transform transition-transform duration-300 ease-out",
+                            mobileProfileOpen
+                              ? "translate-x-0"
+                              : "translate-x-full"
+                          )}
+                          style={{ width: "75vw", maxWidth: "75%" }}
+                        >
+                          <GuestProfilePanel
+                            profile={activeProfile}
+                            onCloseConversation={handleCloseConversation}
+                          />
+                        </div>
+
+                        {/* 半透明遮罩，點擊關閉 */}
+                        {mobileProfileOpen && (
+                          <button
+                            type="button"
+                            className="absolute inset-0 z-20 bg-black/20"
+                            onClick={() => setMobileProfileOpen(false)}
+                          />
+                        )}
+                      </>
+                    )}
                   </div>
                 )}
               </>
@@ -1553,9 +1605,7 @@ function InboxContent() {
           {/* Wynn 风格抽屉菜单 */}
           {mobileMenuOpen && (
             <div className="fixed inset-0 z-40 flex">
-              {/* 左侧白色面板 */}
               <div className="w-72 max-w-[80%] h-full bg-white shadow-2xl flex flex-col">
-                {/* 顶部：logo + 关闭 */}
                 <div
                   className="px-5 pt-10 pb-4 border-b flex items-center justify-between"
                   style={{ borderColor: "var(--divider)" }}
@@ -1578,9 +1628,7 @@ function InboxContent() {
                   </button>
                 </div>
 
-                {/* 中间：菜单项 */}
                 <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-6">
-                  {/* CHAT 组 */}
                   <section>
                     <div className="text-[11px] font-semibold tracking-[0.18em] text-[#a79a86] uppercase mb-3">
                       CHAT
@@ -1592,7 +1640,6 @@ function InboxContent() {
                     </div>
                   </section>
 
-                  {/* MANAGEMENT 组 */}
                   <section>
                     <div className="text-[11px] font-semibold tracking-[0.18em] text-[#a79a86] uppercase mb-3">
                       MANAGEMENT
@@ -1605,7 +1652,6 @@ function InboxContent() {
                   </section>
                 </div>
 
-                {/* 底部：当前用户（简单占位） */}
                 <div
                   className="px-5 py-4 border-t flex items-center gap-3"
                   style={{ borderColor: "var(--divider)" }}
@@ -1628,7 +1674,6 @@ function InboxContent() {
                 </div>
               </div>
 
-              {/* 右侧半透明遮罩，点击关闭 */}
               <button
                 type="button"
                 className="flex-1 bg-black/30"
@@ -1650,18 +1695,14 @@ function InboxContent() {
         unreadCounts={unreadCounts}
       />
 
-      {/* 右側主區域：上面是 Header，下面根據 channel 切換內容 */}
       <div className="flex-1 flex flex-col overflow-hidden">
         <AppHeader />
         <div className="flex-1 flex overflow-hidden">
           {activeChannel === "vipRequests" ? (
-            // 左侧选中「VIP Requests」：走审批视图
             <VipRequestsView onPendingCountChange={setVipPendingCount} />
           ) : activeChannel === "vipContacts" ? (
-            // 左侧选中「VIP Contacts」：走 VIP 通讯录视图
             <VipListView />
           ) : (
-            // 其它渠道：会话列表 + 聊天 + Profile
             <>
               <ConversationListPanel
                 conversations={visibleConversations}

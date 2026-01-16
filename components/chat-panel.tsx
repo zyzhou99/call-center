@@ -10,8 +10,12 @@ interface ChatPanelProps {
   conversation: Conversation | null;
   messages: Message[];
   onSendMessage: (text: string) => void;
-  // ⭐ 新增：手機端點擊返回列表
+  // ⭐ 手機端點擊返回列表
   onMobileBack?: () => void;
+  // ⭐ 新增：點擊 header 裡的头像（給 Inbox 開 VIP panel 用）
+  onHeaderAvatarClick?: () => void;
+  // ⭐ 新增：是否讓 header 吸頂（主要是 mobile）
+  stickyHeader?: boolean;
 }
 
 export function ChatPanel({
@@ -19,6 +23,8 @@ export function ChatPanel({
   messages,
   onSendMessage,
   onMobileBack,
+  onHeaderAvatarClick,
+  stickyHeader,
 }: ChatPanelProps) {
   const [messageText, setMessageText] = useState("");
   const [status, setStatus] = useState<"open" | "resolved">("open");
@@ -92,7 +98,11 @@ export function ChatPanel({
     <div className="flex-1 flex flex-col bg-white">
       {/* 顶部：返回（手機）+ 头像 + 名字 + 电话按钮 */}
       <div
-        className="px-4 py-3 md:px-6 md:py-4 flex items-center justify-between"
+        className={cn(
+          "px-4 py-3 md:px-6 md:py-4 flex items-center justify-between bg-white",
+          // ⭐ 如果 stickyHeader 為 true，就讓 header 吸頂
+          stickyHeader && "sticky top-0 z-10"
+        )}
         style={{ borderBottom: "1px solid var(--divider)" }}
       >
         <div className="flex items-center space-x-3">
@@ -107,15 +117,20 @@ export function ChatPanel({
             </button>
           )}
 
-          <div
+          {/* ⭐ 头像改成 button，點擊時調用 onHeaderAvatarClick（如果有） */}
+          <button
+            type="button"
+            onClick={onHeaderAvatarClick}
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
             style={{
               backgroundColor: "var(--avatar-bg)",
               color: "var(--accent)",
+              cursor: onHeaderAvatarClick ? "pointer" : "default",
             }}
           >
             {initials}
-          </div>
+          </button>
+
           <div>
             <h2
               className="font-medium"
@@ -436,7 +451,7 @@ function PhoneCallItem({ message }: PhoneCallItemProps) {
       {/* 可选 Summary：只有有文字的时候才显示 */}
       {message.text && message.text.trim().length > 0 && (
         <div
-          className="mt-1 rounded-md px-3 py-2 bg-white border border-[var(--divider)]"
+          className="mt-1 rounded-md px-3 py-2 bg白 border border-[var(--divider)]"
           style={{ color: "var(--text-primary)" }}
         >
           <div
