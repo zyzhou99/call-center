@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/auth-context";
 import Image from "next/image";
 import loginImg from "@/assets/login.png";
 import wynnWater from "@/assets/wynn-water.png";
-import loginMobile from "@/assets/login-mobile.png";
+import loginHotel from "@/assets/login-hotel.png";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -65,7 +65,7 @@ export default function LoginPage() {
           <div className="relative w-full">
             <div className="relative w-full h-[260px] overflow-hidden rounded-b-[52px]">
               <Image
-                src={loginMobile}
+                src={loginHotel}
                 alt="VIP Service Center Login"
                 fill
                 priority
@@ -99,8 +99,7 @@ export default function LoginPage() {
 
             {/* 表單卡片 */}
             <div
-              className="rounded-2xl px-5 py-6"
-              style={{ backgroundColor: "#fff9f0ff" }}
+              className="rounded-2xl px-2 py-3"
             >
               <form onSubmit={handleSubmit} className="space-y-4">
                 {/* EMAIL */}
