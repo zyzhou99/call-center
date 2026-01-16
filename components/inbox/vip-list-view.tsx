@@ -1271,7 +1271,7 @@ export function VipListView() {
 
           {/* 备注 tab */}
           {rightTab === "remark" && (
-            <div className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
               <div
                 className="text-[11px]"
                 style={{ color: "var(--text-secondary)" }}
@@ -1279,40 +1279,26 @@ export function VipListView() {
                 备注仅内部可见，不会展示给客人。
               </div>
 
-              <div className="relative">
+              {/* 大块备注气泡区域 */}
+              <div className="relative rounded-2xl px-4 pt-3 pb-10 bg-[#F5F5F5]">
                 <textarea
                   ref={remarkTextareaRef}
-                  readOnly={!isRemarkEditing}
                   value={form?.remark ?? ""}
                   onChange={(e) => updateForm("remark", e.target.value)}
-                  className={cn(
-                    inputClass,
-                    "min-h-[96px] pr-10",
-                    !isRemarkEditing && "bg-[#F9FAFB] cursor-default"
-                  )}
-                  placeholder="例如：喜欢被称呼为豆总；偏爱高楼层海景；忌讳鲜花摆放在房间内等。"
+                  className="w-full min-h-[96px] bg-transparent border-none outline-none resize-none text-[13px] leading-relaxed"
+                  placeholder="请输入备注信息"
                 />
-                {/* 笔 icon：点击后进入编辑模式并聚焦输入框 */}
+
+                {/* 右下角「保存备注」按钮：只改样式，不改任何原来的保存逻辑 */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsRemarkEditing(true);
-                    setTimeout(() => {
-                      if (remarkTextareaRef.current) {
-                        const el = remarkTextareaRef.current;
-                        el.focus();
-                        const len = el.value.length;
-                        el.setSelectionRange(len, len);
-                      }
-                    }, 0);
-                  }}
-                  className="absolute right-3 top-3 text-xs px-2 py-1 rounded-full"
+                  className="absolute right-4 bottom-3 px-3 py-1.5 rounded-full text-[12px] shadow-sm"
                   style={{
-                    backgroundColor: "#F5E3C7",
-                    color: "#7A5A22",
+                    backgroundColor: "#FFFFFF",
+                    color: "#4b3a2b",
                   }}
                 >
-                  ✎
+                  保存备注
                 </button>
               </div>
 
@@ -1320,7 +1306,7 @@ export function VipListView() {
                 className="text-[11px]"
                 style={{ color: "var(--text-secondary)" }}
               >
-                点击右侧笔形图标可开启编辑模式；修改备注后，请点击下方「更新资料」按钮，将备注写入 VIP 档案。
+                修改备注后，请点击面板下方「更新资料」按钮，将备注写入 VIP 档案。
               </div>
             </div>
           )}
