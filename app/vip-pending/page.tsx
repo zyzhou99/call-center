@@ -266,6 +266,36 @@ export default function VipPendingPage() {
     !!approval &&
     (!!approval.kfUrl || !!approval.sessionId);
 
+  // 👇 下面這幾個都是純 UI 文案，不影響任何邏輯
+  const isPendingLike = status === "PENDING" || status === "INIT";
+
+  const statusMainLabel =
+    status === "APPROVED"
+      ? "Verified"
+      : status === "REJECTED"
+      ? "Unable to Verify"
+      : status === "EXPIRED"
+      ? "Request Expired"
+      : isErrorLike
+      ? "Request Error"
+      : "Verifying Identity";
+
+  const statusSubLabel =
+    status === "APPROVED"
+      ? "身份已验证，请在礼宾对话中继续。"
+      : status === "REJECTED"
+      ? "当前无法通过此渠道完成您的请求。"
+      : status === "EXPIRED"
+      ? "此验证链接已失效，请返回重新提交信息。"
+      : isErrorLike
+      ? "请求出现异常，请稍后重试或重新提交信息。"
+      : "正在核验尊贵会员身份";
+
+  const maskedVipNumber =
+    approval?.vipNumber && approval.vipNumber.trim() !== ""
+      ? approval.vipNumber
+      : "********";
+
   return (
     <div className="min-h-screen bg-[#fbf3e7] flex justify-center">
       <div className="w-full max-w-md flex flex-col bg-[#fbf3e7]">
@@ -283,56 +313,113 @@ export default function VipPendingPage() {
         </div>
 
         {/* 內容區 */}
-        <div className="flex-1 px-7 pt-10 pb-12 flex flex-col">
+        <div className="flex-1 px-7 pt-8 pb-12 flex flex-col">
           <h1 className="text-[20px] font-semibold text-[#3a3023] mb-2">
             Wynn Palace · VIP Concierge
           </h1>
 
-          <p className="text-[12px] text-[#6e5842] mb-8 leading-relaxed">
+          {/* 上方說明文案：只改文字，不動任何邏輯 */}
+          <p className="text-[12px] text-[#6e5842] mb-6 leading-relaxed">
             {status === "PENDING"
-              ? "Thank you for your patience. Our concierge is verifying your details."
-              : "Please wait while we process your request."}
+              ? "Please stay on this page while we verify your membership details."
+              : "Please wait a moment while we process your request."}
           </p>
 
-          {/* 中間狀態卡片 */}
+          {/* 中間狀態卡片區：新的 VIP 卡 + 掃描光效 + 狀態文字 */}
           <div className="flex-1 flex flex-col items-center justify-center">
-            {/* 圓形 spinner / 狀態標誌 */}
-            <div
-              className={`w-16 h-16 mb-4 rounded-full border-2 ${
-                isErrorLike
-                  ? "border-[#d3a65b]"
-                  : "border-[#d3a65b] border-t-transparent animate-spin"
-              }`}
-            />
-
-            <p className="text-[13px] text-center text-[#5b4632] px-4 mb-2">
-              {message}
-            </p>
-
-            {reason && (
-              <p className="text-[11px] text-center text-[#9a7a55] px-4 mt-1">
-                {reason}
-              </p>
-            )}
-
-            {/* ⭐ 新增：審批通過但自動跳轉有問題時，給一個手動入口 */}
-            {canManualEnterChat && (
-              <button
-                type="button"
-                onClick={handleEnterChat}
-                className="mt-4 px-6 py-2 rounded-full text-[12px] font-semibold tracking-[0.18em] uppercase"
+            <div className="verification-container flex flex-col items-center">
+              {/* VIP 卡片 */}
+              <div
+                className="vip-card-animate relative w-[240px] h-[152px] rounded-xl px-[18px] pt-[18px] pb-[18px] overflow-hidden shadow-[0_15px_30px_rgba(168,142,100,0.25),0_5px_10px_rgba(0,0,0,0.05)]"
                 style={{
                   background:
-                    "linear-gradient(91deg, #F3DBAB 3.63%, #D6BB87 100%)",
-                  color: "#3a3023",
+                    "linear-gradient(135deg, #F9EBBE 0%, #E7D3AC 50%, #D6BB9A 100%)",
                 }}
               >
-                Enter Concierge Chat
-              </button>
-            )}
+                {/* 掃描光 */}
+                <div className="vip-scan-line" />
+
+                {/* 卡片頂部：芯片 + Logo */}
+                <div className="flex items-center justify-between mb-4 relative z-[2]">
+                  {/* 金色芯片 */}
+                  <div className="relative w-8 h-[22px] rounded-[4px] border border-[rgba(184,134,11,0.3)] bg-gradient-to-br from-[#d4af37] via-[#feeaa3] to-[#b8860b] shadow-inner">
+                    <div className="chip-lines">
+                      <div className="chip-rect" />
+                    </div>
+                  </div>
+
+                  <div className="text-[10px] tracking-[0.16em] font-semibold text-[#2a2a2a] uppercase">
+                    WYNN PALACE
+                  </div>
+                </div>
+
+                {/* 中部 VIP 文案 */}
+                <div className="text-center relative z-[2] mt-1">
+                  <div className="text-[32px] leading-none tracking-[0.3em] font-semibold italic vip-text-gradient">
+                    VIP
+                  </div>
+                </div>
+
+                {/* 底部會員信息 */}
+                <div className="absolute left-[18px] bottom-[14px] z-[2]">
+                  <div className="text-[8px] tracking-[0.18em] uppercase text-[#4a4a4a] font-semibold mb-[2px]">
+                    Membership ID
+                  </div>
+                  <div className="text-[15px] tracking-[0.18em] font-semibold text-[#111111]">
+                    {maskedVipNumber}
+                  </div>
+                </div>
+              </div>
+
+              {/* 狀態文字區域 */}
+              <div className="mt-8 text-center px-4">
+                <div className="text-[13px] tracking-[0.22em] uppercase font-semibold text-[#333333]">
+                  {statusMainLabel}
+                  {isPendingLike && (
+                    <span className="inline-flex ml-1 align-middle">
+                      <span className="vip-dot vip-dot-1">.</span>
+                      <span className="vip-dot vip-dot-2">.</span>
+                      <span className="vip-dot vip-dot-3">.</span>
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2 text-[11px] text-[#9a7a5c]">
+                  {statusSubLabel}
+                </div>
+
+                {/* PENDING 狀態不再展示舊文案，其他狀態照常展示 message */}
+                {message && !isPendingLike && (
+                  <p className="mt-2 text-[11px] text-[#7b6246]">
+                    {message}
+                  </p>
+                )}
+
+                {reason && (
+                  <p className="mt-2 text-[11px] text-[#b27745]">
+                    {reason}
+                  </p>
+                )}
+
+                {/* 審批通過但自動跳轉有問題時，給一個手動入口（邏輯不變） */}
+                {canManualEnterChat && (
+                  <button
+                    type="button"
+                    onClick={handleEnterChat}
+                    className="mt-4 px-6 py-2 rounded-full text-[12px] font-semibold tracking-[0.18em] uppercase"
+                    style={{
+                      background:
+                        "linear-gradient(91deg, #F3DBAB 3.63%, #D6BB87 100%)",
+                      color: "#3a3023",
+                    }}
+                  >
+                    Enter Concierge Chat
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
 
-          {/* 底部 action */}
+          {/* 底部 action（邏輯完全保留） */}
           {isErrorLike ? (
             <button
               type="button"
@@ -354,6 +441,153 @@ export default function VipPendingPage() {
           )}
         </div>
       </div>
+
+      {/* 🔧 動效相關樣式：只影響本頁 UI，不改任何邏輯 */}
+      <style jsx>{`
+        .vip-card-animate {
+          box-shadow:
+            0 15px 30px rgba(168, 142, 100, 0.25),
+            0 5px 10px rgba(0, 0, 0, 0.05),
+            inset 0 0 0 1px rgba(255, 255, 255, 0.4);
+          animation: vip-card-float 5s ease-in-out infinite;
+          transform-style: preserve-3d;
+        }
+
+        .vip-scan-line {
+          position: absolute;
+          top: -60%;
+          left: -30%;
+          width: 160%;
+          height: 32px;
+          background: linear-gradient(
+            to bottom,
+            rgba(255, 255, 255, 0) 0%,
+            rgba(255, 255, 255, 0.6) 50%,
+            rgba(255, 255, 255, 0) 100%
+          );
+          mix-blend-mode: soft-light;
+          animation: vip-scan-move 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+          pointer-events: none;
+          z-index: 3;
+        }
+
+        .vip-scan-line::after {
+          content: "";
+          position: absolute;
+          top: 50%;
+          left: 0;
+          right: 0;
+          height: 1px;
+          background: rgba(255, 255, 255, 0.5);
+          box-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
+        }
+
+        .chip-lines {
+          position: absolute;
+          inset: 0;
+        }
+
+        .chip-lines::before,
+        .chip-lines::after {
+          content: "";
+          position: absolute;
+          background: rgba(0, 0, 0, 0.2);
+        }
+
+        .chip-lines::before {
+          top: 0;
+          bottom: 0;
+          left: 50%;
+          width: 1px;
+          transform: translateX(-0.5px);
+        }
+
+        .chip-lines::after {
+          left: 0;
+          right: 0;
+          top: 50%;
+          height: 1px;
+          transform: translateY(-0.5px);
+        }
+
+        .chip-rect {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 12px;
+          height: 8px;
+          border-radius: 2px;
+          border: 1px solid rgba(0, 0, 0, 0.2);
+          transform: translate(-50%, -50%);
+        }
+
+        .vip-text-gradient {
+          background: linear-gradient(
+            to bottom,
+            #8b5a2b 0%,
+            #cd853f 50%,
+            #8b5a2b 100%
+          );
+          -webkit-background-clip: text;
+          background-clip: text;
+          color: transparent;
+          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.6));
+        }
+
+        .vip-dot {
+          display: inline-block;
+          font-size: 1em;
+          line-height: 1;
+          animation: vip-dot 1.2s infinite;
+        }
+        .vip-dot-2 {
+          animation-delay: 0.2s;
+        }
+        .vip-dot-3 {
+          animation-delay: 0.4s;
+        }
+
+        @keyframes vip-card-float {
+          0%,
+          100% {
+            transform: translateY(0);
+          }
+          50% {
+            transform: translateY(-6px);
+          }
+        }
+
+        @keyframes vip-scan-move {
+          0% {
+            top: -60%;
+            opacity: 0;
+          }
+          20% {
+            opacity: 1;
+          }
+          80% {
+            opacity: 1;
+          }
+          100% {
+            top: 160%;
+            opacity: 0;
+          }
+        }
+
+        @keyframes vip-dot {
+          0%,
+          20% {
+            opacity: 0;
+          }
+          40% {
+            opacity: 1;
+          }
+          60%,
+          100% {
+            opacity: 0;
+          }
+        }
+      `}</style>
     </div>
   );
 }
