@@ -132,7 +132,7 @@ export default function VipEntryPage() {
     void run();
   }, [entryKey, qrCodeParam, tokenParam, vipKeyParam, router]);
 
-  const isProcessing = status === "processing" || status === "idle";
+    const isProcessing = status === "processing" || status === "idle";
 
   // 文案：上方英文状态 + 下方中文副标题
   const statusLine =
@@ -149,341 +149,144 @@ export default function VipEntryPage() {
       : "正在核验尊贵会员身份，请保持当前页面打开";
 
   return (
-    <div className="vip-entry-page">
-      <div className="verification-container">
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{ backgroundColor: "#FFF9F0" }}
+    >
+      <div className="w-full max-w-[360px] flex flex-col items-center">
         {/* 金色 VIP 卡片 */}
-        <div className="vip-card">
-          {isProcessing && <div className="scan-line" />}
+        <div
+          className="w-[240px] h-[152px] rounded-[12px] relative p-[18px] overflow-hidden"
+          style={{
+            background:
+              "linear-gradient(135deg,#F9EBBE 0%,#E7D3AC 50%,#D6BB9A 100%)",
+            boxShadow:
+              "0 15px 30px rgba(168,142,100,0.25)," +
+              "0 5px 10px rgba(0,0,0,0.05)," +
+              "inset 0 0 0 1px rgba(255,255,255,0.4)",
+          }}
+        >
+          {/* 扫描光效：用 Tailwind 自带的 animate-pulse 代替复杂 keyframe */}
+          {isProcessing && (
+            <div
+              className="absolute -top-1/2 -left-1/3 w-[150%] h-[30px] rotate-[-15deg] animate-pulse"
+              style={{
+                background:
+                  "linear-gradient(to bottom,rgba(255,255,255,0) 0%,rgba(255,255,255,0.6) 50%,rgba(255,255,255,0) 100%)",
+                mixBlendMode: "soft-light",
+              }}
+            />
+          )}
 
-          <div className="card-top">
-            <div className="card-chip">
-              <div className="chip-lines">
-                <div className="chip-rect" />
+          {/* 顶部：芯片 + LOGO */}
+          <div className="flex items-center justify-between mb-[15px] relative z-10">
+            {/* 芯片 */}
+            <div
+              className="w-8 h-[22px] rounded-[4px] relative"
+              style={{
+                background:
+                  "linear-gradient(135deg,#d4af37 0%,#feeaa3 50%,#b8860b 100%)",
+                border: "1px solid rgba(184,134,11,0.3)",
+                boxShadow: "inset 0 1px 2px rgba(255,255,255,0.4)",
+              }}
+            >
+              <div className="absolute inset-0">
+                {/* 竖线 */}
+                <div
+                  className="absolute top-0 bottom-0 left-1/2 w-px"
+                  style={{
+                    background: "rgba(0,0,0,0.2)",
+                    transform: "translateX(-0.5px)",
+                  }}
+                />
+                {/* 横线 */}
+                <div
+                  className="absolute left-0 right-0 top-1/2 h-px"
+                  style={{
+                    background: "rgba(0,0,0,0.2)",
+                    transform: "translateY(-0.5px)",
+                  }}
+                />
+                {/* 中间小矩形 */}
+                <div
+                  className="absolute w-[12px] h-[8px] rounded-[2px]"
+                  style={{
+                    border: "1px solid rgba(0,0,0,0.2)",
+                    top: "50%",
+                    left: "50%",
+                    transform: "translate(-50%,-50%)",
+                  }}
+                />
               </div>
             </div>
-            <div className="card-logo">WYNN PALACE</div>
+
+            {/* LOGO 文字 */}
+            <div className="text-[10px] font-semibold tracking-[0.1em] text-[#2a2a2a] uppercase">
+              WYNN PALACE
+            </div>
           </div>
 
-          <div className="card-center">
-            <div className="vip-text">VIP</div>
+          {/* 中间 VIP 字样 */}
+          <div className="text-center mt-[2px] relative z-10">
+            <div
+              className="text-[32px] font-bold italic tracking-[0.4em]"
+              style={{
+                background:
+                  "linear-gradient(to bottom,#8B5A2B 0%,#CD853F 50%,#8B5A2B 100%)",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+                filter: "drop-shadow(0 1px 0 rgba(255,255,255,0.6))",
+              }}
+            >
+              VIP
+            </div>
           </div>
 
-          <div className="card-bottom">
-            <span className="member-label">Membership ID</span>
-            <span className="card-number">********</span>
+          {/* 底部 Membership ID */}
+          <div className="absolute left-[18px] bottom-[14px] z-10">
+            <span className="block text-[8px] uppercase tracking-[0.1em] text-[#4a4a4a] font-bold mb-[1px]">
+              Membership ID
+            </span>
+            <span
+              className="text-[15px] tracking-[0.2em] font-bold text-[#111111]"
+              style={{
+                textShadow: "0 1px 0 rgba(255,255,255,0.4)",
+              }}
+            >
+              ********
+            </span>
           </div>
         </div>
 
         {/* 状态区 */}
-        <div className="status-container">
-          <div className="status-text">
+        <div className="mt-10 text-center">
+          <div className="text-[13px] tracking-[0.2em] font-semibold text-[#333333] uppercase">
             {statusLine}
-            {isProcessing && <span className="loading-dots" />}
+            {isProcessing && (
+              <span className="inline-block ml-1 animate-pulse">...</span>
+            )}
           </div>
-          <span className="sub-text">{subStatusLine}</span>
+          <div className="mt-[6px] text-[10px] text-[#999999] tracking-[0.1em]">
+            {subStatusLine}
+          </div>
 
-          <p className="message-text">
+          <p className="mt-3 text-[13px] leading-relaxed text-[#4b3a2b]">
             {message || "正在为您连接专属礼宾，请稍候…"}
           </p>
         </div>
 
-        {/* 错误提示保持原有文案，只是换个样式 */}
+        {/* 错误提示：保持原来的意思，只是用 Tailwind 调一下样式 */}
         {status === "error" && (
-          <div className="error-box">
+          <div className="mt-4 w-full text-[12px] text-[#b91c1c] bg-[#fef2f2] border border-[#fecaca] rounded-lg px-3 py-2 text-center">
             如果多次扫码仍无法进入，请联系酒店礼宾团队协助处理。
           </div>
         )}
 
-        <div className="footer-tip">
+        <div className="mt-5 text-[11px] text-[#9b8773] text-center">
           为了您的隐私安全，请勿将此页面分享给他人。
         </div>
       </div>
-
-      {/* 本组件私有样式，基于你给的参考 HTML 精简适配 */}
-      <style jsx>{`
-        .vip-entry-page {
-          min-height: 100vh;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 32px 16px;
-          background-color: #fff9f0;
-        }
-
-        .verification-container {
-          position: relative;
-          width: 100%;
-          max-width: 360px;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-        }
-
-        .vip-card {
-          width: 240px;
-          height: 152px;
-          background: linear-gradient(
-            135deg,
-            #f9ebbe 0%,
-            #e7d3ac 50%,
-            #d6bb9a 100%
-          );
-          border-radius: 12px;
-          position: relative;
-          padding: 18px;
-          box-shadow: 0 15px 30px rgba(168, 142, 100, 0.25),
-            0 5px 10px rgba(0, 0, 0, 0.05),
-            inset 0 0 0 1px rgba(255, 255, 255, 0.4);
-          animation: cardFloat 5s ease-in-out infinite;
-          transform-style: preserve-3d;
-          overflow: hidden;
-        }
-
-        .card-top {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 15px;
-          position: relative;
-          z-index: 2;
-        }
-
-        .card-chip {
-          width: 32px;
-          height: 22px;
-          background: linear-gradient(
-            135deg,
-            #d4af37 0%,
-            #feeaa3 50%,
-            #b8860b 100%
-          );
-          border-radius: 4px;
-          position: relative;
-          border: 1px solid rgba(184, 134, 11, 0.3);
-          box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.4);
-        }
-
-        .chip-lines {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 100%;
-          height: 100%;
-        }
-        .chip-lines::before,
-        .chip-lines::after {
-          content: "";
-          position: absolute;
-          background: rgba(0, 0, 0, 0.2);
-        }
-        .chip-lines::before {
-          top: 0;
-          bottom: 0;
-          left: 50%;
-          width: 1px;
-          transform: translateX(-0.5px);
-        }
-        .chip-lines::after {
-          left: 0;
-          right: 0;
-          top: 50%;
-          height: 1px;
-          transform: translateY(-0.5px);
-        }
-
-        .chip-rect {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 12px;
-          height: 8px;
-          border: 1px solid rgba(0, 0, 0, 0.2);
-          border-radius: 2px;
-        }
-
-        .card-logo {
-          font-size: 10px;
-          font-weight: 600;
-          letter-spacing: 1px;
-          color: #2a2a2a;
-          text-transform: uppercase;
-        }
-
-        .card-center {
-          text-align: center;
-          margin-top: 5px;
-          position: relative;
-          z-index: 2;
-        }
-
-        .vip-text {
-          font-size: 32px;
-          font-weight: 700;
-          letter-spacing: 4px;
-          font-style: italic;
-          background: linear-gradient(
-            to bottom,
-            #8b5a2b 0%,
-            #cd853f 50%,
-            #8b5a2b 100%
-          );
-          -webkit-background-clip: text;
-          background-clip: text;
-          color: transparent;
-          filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.6));
-        }
-
-        .card-bottom {
-          position: absolute;
-          bottom: 14px;
-          left: 18px;
-          z-index: 2;
-        }
-
-        .member-label {
-          font-size: 8px;
-          text-transform: uppercase;
-          letter-spacing: 1px;
-          color: #4a4a4a;
-          display: block;
-          margin-bottom: 1px;
-          font-weight: 700;
-        }
-
-        .card-number {
-          font-size: 15px;
-          letter-spacing: 2px;
-          font-weight: 700;
-          color: #111111;
-          text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
-        }
-
-        .scan-line {
-          position: absolute;
-          top: -60%;
-          left: -30%;
-          width: 150%;
-          height: 30px;
-          background: linear-gradient(
-            to bottom,
-            rgba(255, 255, 255, 0) 0%,
-            rgba(255, 255, 255, 0.6) 50%,
-            rgba(255, 255, 255, 0) 100%
-          );
-          mix-blend-mode: soft-light;
-          transform: rotate(-15deg);
-          animation: scanMove 2.5s cubic-bezier(0.4, 0, 0.2, 1) infinite;
-          z-index: 3;
-          pointer-events: none;
-        }
-        .scan-line::after {
-          content: "";
-          position: absolute;
-          top: 50%;
-          left: 0;
-          right: 0;
-          height: 1px;
-          background: rgba(255, 255, 255, 0.5);
-          box-shadow: 0 0 2px rgba(255, 255, 255, 0.8);
-        }
-
-        .status-container {
-          margin-top: 40px;
-          text-align: center;
-        }
-
-        .status-text {
-          font-size: 13px;
-          letter-spacing: 2px;
-          color: #333333;
-          font-weight: 700;
-          text-transform: uppercase;
-        }
-
-        .loading-dots::after {
-          content: ".";
-          animation: dots 1.5s steps(5, end) infinite;
-        }
-
-        .sub-text {
-          display: block;
-          margin-top: 6px;
-          font-size: 10px;
-          color: #999999;
-          letter-spacing: 1px;
-        }
-
-        .message-text {
-          margin-top: 10px;
-          font-size: 13px;
-          color: #4b3a2b;
-          line-height: 1.6;
-        }
-
-        .error-box {
-          margin-top: 14px;
-          width: 100%;
-          font-size: 12px;
-          color: #b91c1c;
-          background-color: #fef2f2;
-          border: 1px solid #fecaca;
-          border-radius: 8px;
-          padding: 8px 10px;
-        }
-
-        .footer-tip {
-          margin-top: 20px;
-          font-size: 11px;
-          color: #9b8773;
-          text-align: center;
-        }
-
-        @keyframes cardFloat {
-          0%,
-          100% {
-            transform: translateY(0);
-          }
-          50% {
-            transform: translateY(-6px);
-          }
-        }
-
-        @keyframes scanMove {
-          0% {
-            top: -60%;
-            opacity: 0;
-          }
-          20% {
-            opacity: 1;
-          }
-          80% {
-            opacity: 1;
-          }
-          100% {
-            top: 160%;
-            opacity: 0;
-          }
-        }
-
-        @keyframes dots {
-          0%,
-          20% {
-            content: ".";
-          }
-          40% {
-            content: "..";
-          }
-          60% {
-            content: "...";
-          }
-          80%,
-          100% {
-            content: "";
-          }
-        }
-      `}</style>
     </div>
   );
 }
