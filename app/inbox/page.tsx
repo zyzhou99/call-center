@@ -18,6 +18,17 @@ import type { GuestProfile } from "@/types";
 import { getLastMessageTimestamp } from "@/lib/conversation-utils";
 import { VipRequestsView } from "@/components/inbox/vip-requests-view";
 import { VipListView } from "@/components/inbox/vip-list-view";
+import { cn } from "@/lib/utils";
+import Image from "next/image";
+import wynnGold from "@/assets/wynn-gold.png";
+import {
+  MessageCircle,
+  Mail,
+  Phone,
+  Users,
+  Inbox as InboxIcon,
+  X as CloseIcon,
+} from "lucide-react";
 
 type VipRequestStatus = "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
 
@@ -1256,23 +1267,21 @@ function InboxContent() {
     console.log("Close conversation");
   };
 
-  const chatChannels: InboxChannel[] = [
+    const chatChannels: InboxChannel[] = [
     "wechat",
     "whatsapp",
     "webchat",
     "line",
   ];
 
-  // 🟡 手机端：列表 / 详情 + 底部输入框 + 左下角悬浮菜单
+  // 🟡 手机端：列表 / 详情 + 底部输入框 + 左下角 Wynn 风格悬浮菜单
   if (isMobile) {
-    const mobileMenuItems: {
-      key: string;
-      label: string;
-      onClick: () => void;
-    }[] = [
+    // menu 配置：只改 UI，不改 onClick 的逻辑
+    const mobileMenuItems = [
       {
         key: "chat",
         label: "Chat",
+        section: "CHAT",
         onClick: () => {
           if (!chatChannels.includes(activeChannel)) {
             handleChannelSelect("wechat");
@@ -1285,6 +1294,7 @@ function InboxContent() {
       {
         key: "email",
         label: "E-Mail",
+        section: "CHAT",
         onClick: () => {
           handleChannelSelect("email");
           setMobileMenuOpen(false);
@@ -1293,6 +1303,7 @@ function InboxContent() {
       {
         key: "mobile",
         label: "Mobile",
+        section: "CHAT",
         onClick: () => {
           handleChannelSelect("phone");
           setMobileMenuOpen(false);
@@ -1301,6 +1312,7 @@ function InboxContent() {
       {
         key: "contacts",
         label: "Contact",
+        section: "MANAGEMENT",
         onClick: () => {
           handleChannelSelect("vipContacts");
           setMobileMenuOpen(false);
@@ -1309,30 +1321,143 @@ function InboxContent() {
       {
         key: "requests",
         label: "Requests",
+        section: "MANAGEMENT",
         onClick: () => {
           handleChannelSelect("vipRequests");
           setMobileMenuOpen(false);
         },
       },
-    ];
+    ] as const;
+
+    // 当前高亮哪一行：Chat / E-Mail / Mobile / Contact / Requests
+    const activeMenuKey: (typeof mobileMenuItems)[number]["key"] =
+      chatChannels.includes(activeChannel)
+        ? "chat"
+        : activeChannel === "email"
+        ? "email"
+        : activeChannel === "phone"
+        ? "mobile"
+        : activeChannel === "vipContacts"
+        ? "contacts"
+        : activeChannel === "vipRequests"
+        ? "requests"
+        : "chat";
+
+    // 每个菜单的红点数量
+    const chatUnread =
+      unreadCounts.wechat +
+      unreadCounts.whatsapp +
+      unreadCounts.webchat +
+      unreadCounts.line;
+    const emailUnread = unreadCounts.email;
+    const mobileUnread = unreadCounts.phone;
+    const requestsUnread = vipPendingCount;
+
+    const getMenuBadgeCount = (
+      key: (typeof mobileMenuItems)[number]["key"]
+    ) => {
+      if (key === "chat") return chatUnread;
+      if (key === "email") return emailUnread;
+      if (key === "mobile") return mobileUnread;
+      if (key === "requests") return requestsUnread;
+      return 0;
+    };
+
+    // 每个菜单行左侧的小图标（不用 emoji）
+    const renderMenuIcon = (
+      key: (typeof mobileMenuItems)[number]["key"],
+      isActive: boolean
+    ) => {
+      const color = isActive ? "#3a3023" : "#a79a86";
+      const common = { className: "w-4 h-4", style: { color } };
+
+      if (key === "chat") return <MessageCircle {...common} />;
+      if (key === "email") return <Mail {...common} />;
+      if (key === "mobile") return <Phone {...common} />;
+      if (key === "contacts") return <Users {...common} />;
+      if (key === "requests") return <InboxIcon {...common} />;
+      return null;
+    };
+
+    const chatMenuItems = mobileMenuItems.filter(
+      (i) => i.section === "CHAT"
+    );
+    const managementMenuItems = mobileMenuItems.filter(
+      (i) => i.section === "MANAGEMENT"
+    );
 
     const showChannelTabs =
       chatChannels.includes(activeChannel) &&
       mobileConversationView === "list";
 
+    // 渲染 Wynn 风格的一条菜单行
+    const renderMenuItem = (item: (typeof mobileMenuItems)[number]) => {
+      const isActive = item.key === activeMenuKey;
+      const badgeCount = getMenuBadgeCount(item.key);
+
+      return (
+        <button
+          key={item.key}
+          type="button"
+          onClick={item.onClick}
+          className={cn(
+            "w-full flex items-center justify-between rounded-2xl px-4 py-3 mb-2 transition-colors",
+            isActive
+              ? "bg-gradient-to-r from-[#f7ecdb] to-[#f4ddbf]"
+              : "bg-transparent hover:bg-black/5"
+          )}
+        >
+          <div className="flex items-center gap-3">
+            <div
+              className="w-9 h-9 rounded-full border flex items-center justify-center"
+              style={{
+                borderColor: isActive ? "#cda667" : "#e0d6c6",
+                backgroundColor: isActive ? "#fff7ed" : "#faf7f2",
+              }}
+            >
+              {renderMenuIcon(item.key, isActive)}
+            </div>
+            <span
+              className="text-sm"
+              style={{
+                color: isActive ? "#3a3023" : "var(--text-primary)",
+              }}
+            >
+              {item.label}
+            </span>
+          </div>
+
+          {badgeCount > 0 && (
+            <span
+              className="min-w-[32px] h-6 px-2 rounded-full text-[11px] font-medium flex items-center justify-center"
+              style={{ backgroundColor: "#f9735b", color: "#ffffff" }}
+            >
+              {badgeCount > 99 ? "99+" : badgeCount}
+            </span>
+          )}
+        </button>
+      );
+    };
+
     return (
       <AppShell>
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col overflow-hidden min-h-0">
           <AppHeader />
 
           {/* 主内容：按 channel 决定是 VIP 视图还是 Chat 视图 */}
-          <div className="flex-1 flex flex-col overflow-hidden">
+          <div className="flex-1 flex flex-col overflow-hidden min-h-0">
             {activeChannel === "vipRequests" ? (
-              <VipRequestsView
-                onPendingCountChange={setVipPendingCount}
-              />
+              // 👉 VIP Requests 整页可滚动
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <VipRequestsView
+                  onPendingCountChange={setVipPendingCount}
+                />
+              </div>
             ) : activeChannel === "vipContacts" ? (
-              <VipListView />
+              // 👉 VIP Contacts 整页可滚动
+              <div className="flex-1 min-h-0 overflow-y-auto">
+                <VipListView />
+              </div>
             ) : (
               <>
                 {/* Chat 顶部的渠道 tab（只在列表页显示，在对话页隐藏） */}
@@ -1373,25 +1498,29 @@ function InboxContent() {
                 )}
 
                 {mobileConversationView === "list" ? (
-                  // 会话列表页（占满全屏）
-                  <ConversationListPanel
-                    conversations={visibleConversations}
-                    activeConversationId={activeConversationId}
-                    onConversationSelect={handleConversationSelect}
-                    searchQuery={searchQuery}
-                    onSearchChange={setSearchQuery}
-                    messagesState={messagesState}
-                    searchResults={searchResults}
-                    onSearchResultSelect={handleSearchResultSelect}
-                  />
+                  // 👉 会话列表页
+                  <div className="flex-1 min-h-0 overflow-y-auto">
+                    <ConversationListPanel
+                      conversations={visibleConversations}
+                      activeConversationId={activeConversationId}
+                      onConversationSelect={handleConversationSelect}
+                      searchQuery={searchQuery}
+                      onSearchChange={setSearchQuery}
+                      messagesState={messagesState}
+                      searchResults={searchResults}
+                      onSearchResultSelect={handleSearchResultSelect}
+                    />
+                  </div>
                 ) : (
-                  // 会话详情页：ChatPanel 占满，输入框自然在底部
-                  <div className="flex-1 flex flex-col overflow-hidden relative">
+                  // 👉 会话详情页
+                  <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative">
                     <ChatPanel
                       conversation={activeConversation}
                       messages={activeMessages}
                       onSendMessage={handleSendMessage}
-                      onMobileBack={() => setMobileConversationView("list")}
+                      onMobileBack={() =>
+                        setMobileConversationView("list")
+                      }
                     />
                   </div>
                 )}
@@ -1399,67 +1528,107 @@ function InboxContent() {
             )}
           </div>
 
-          {/* 左下角悬浮 hamburger 菜单 */}
+          {/* 左下角悬浮 hamburger 菜单按钮 */}
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}
-            className="fixed bottom-16 left-8 z-30 rounded-full shadow-lg p-6 bg-white"
+            className="fixed bottom-16 left-8 z-30 rounded-full shadow-lg bg-white w-14 h-14 flex items-center justify-center"
           >
-            <div className="flex flex-col gap-[3px]">
+            <div className="flex flex-col gap-[4px]">
               <span
-                className="w-4 h-[2px] rounded-full"
+                className="w-5 h-[2px] rounded-full"
                 style={{ backgroundColor: "var(--text-primary)" }}
               />
               <span
-                className="w-4 h-[2px] rounded-full"
+                className="w-5 h-[2px] rounded-full"
                 style={{ backgroundColor: "var(--text-primary)" }}
               />
               <span
-                className="w-4 h-[2px] rounded-full"
+                className="w-5 h-[2px] rounded-full"
                 style={{ backgroundColor: "var(--text-primary)" }}
               />
             </div>
           </button>
 
-          {/* 抽屉菜单 */}
+          {/* Wynn 风格抽屉菜单 */}
           {mobileMenuOpen && (
             <div className="fixed inset-0 z-40 flex">
-              <div className="w-64 max-w-[75%] h-full bg-white shadow-xl flex flex-col">
+              {/* 左侧白色面板 */}
+              <div className="w-72 max-w-[80%] h-full bg-white shadow-2xl flex flex-col">
+                {/* 顶部：logo + 关闭 */}
                 <div
-                  className="px-4 py-4 border-b flex items-center justify-between"
+                  className="px-5 pt-10 pb-4 border-b flex items-center justify-between"
                   style={{ borderColor: "var(--divider)" }}
                 >
-                  <span
-                    className="text-sm font-semibold"
-                    style={{ color: "var(--text-primary)" }}
-                  >
-                    Menu
-                  </span>
+                  <Image
+                    src={wynnGold}
+                    alt="Wynn"
+                    className="h-6 w-auto"
+                    priority
+                  />
                   <button
                     type="button"
-                    className="text-xl"
-                    style={{ color: "var(--text-secondary)" }}
                     onClick={() => setMobileMenuOpen(false)}
+                    className="p-1 rounded-full hover:bg-black/5"
                   >
-                    ×
+                    <CloseIcon
+                      className="w-4 h-4"
+                      style={{ color: "var(--text-secondary)" }}
+                    />
                   </button>
                 </div>
 
-                <nav className="flex-1 py-2">
-                  {mobileMenuItems.map((item) => (
-                    <button
-                      key={item.key}
-                      type="button"
-                      onClick={item.onClick}
-                      className="w-full flex items-center px-5 py-3 text-left text-sm"
+                {/* 中间：菜单项 */}
+                <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-6">
+                  {/* CHAT 组 */}
+                  <section>
+                    <div className="text-[11px] font-semibold tracking-[0.18em] text-[#a79a86] uppercase mb-3">
+                      CHAT
+                    </div>
+                    <div className="space-y-1">
+                      {chatMenuItems.map((item) =>
+                        renderMenuItem(item)
+                      )}
+                    </div>
+                  </section>
+
+                  {/* MANAGEMENT 组 */}
+                  <section>
+                    <div className="text-[11px] font-semibold tracking-[0.18em] text-[#a79a86] uppercase mb-3">
+                      MANAGEMENT
+                    </div>
+                    <div className="space-y-1">
+                      {managementMenuItems.map((item) =>
+                        renderMenuItem(item)
+                      )}
+                    </div>
+                  </section>
+                </div>
+
+                {/* 底部：当前用户（简单占位） */}
+                <div
+                  className="px-5 py-4 border-t flex items-center gap-3"
+                  style={{ borderColor: "var(--divider)" }}
+                >
+                  <div className="w-9 h-9 rounded-full bg-[#d1f6ea] flex items-center justify-center text-[13px] font-medium text-[#10624a]">
+                    A
+                  </div>
+                  <div className="flex flex-col">
+                    <span
+                      className="text-sm"
                       style={{ color: "var(--text-primary)" }}
                     >
-                      {item.label}
-                    </button>
-                  ))}
-                </nav>
+                      Agent
+                    </span>
+                    <span className="flex items-center gap-1 text-[11px] text-[#15a36b]">
+                      <span className="w-2 h-2 rounded-full bg-[#15a36b]" />
+                      Online
+                    </span>
+                  </div>
+                </div>
               </div>
 
+              {/* 右侧半透明遮罩，点击关闭 */}
               <button
                 type="button"
                 className="flex-1 bg-black/30"

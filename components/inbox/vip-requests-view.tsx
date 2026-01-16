@@ -32,7 +32,7 @@ interface VipRequestItem {
   inputChannelIdentifier?: string | null;
   nicknameFromChannel?: string | null;
 
-  // ⭐ 新增：後端 PendingApproval.reason，當作客服備註使用
+  // ⭐ 後端 PendingApproval.reason，當作客服備註使用
   reason?: string | null;
 
   vipGuest?: VipGuestLite | null;
@@ -72,14 +72,6 @@ const formatTime = (iso?: string | null) => {
     hour: "2-digit",
     minute: "2-digit",
   });
-};
-
-const normalizeStr = (v?: string | null) =>
-  (v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
-
-const isDiff = (dbValue?: string | null, inputValue?: string | null) => {
-  if (!dbValue || !inputValue) return false;
-  return normalizeStr(dbValue) !== normalizeStr(inputValue);
 };
 
 const getStatusChipStyle = (status: VipRequestStatus) => {
@@ -124,10 +116,10 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ⭐ 新增：每一條 request 各自的備註
+  // ⭐ 每一條 request 的備註
   const [remarkById, setRemarkById] = useState<Record<string, string>>({});
 
-  // ⭐ 新增：手機端列表 / 詳情視圖切換，只影響 < md
+  // ⭐ 手機端列表 / 詳情視圖切換，只影響 < md
   const [mobileView, setMobileView] = useState<"list" | "detail">("list");
 
   // ------- data fetching -------
@@ -260,7 +252,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
     return requests.find((r) => r.id === activeId) ?? null;
   }, [requests, activeId]);
 
-  // ⭐ 當前這條 request 對應的備註內容
+  // 當前這條 request 對應的備註內容
   const remark =
     activeRequest && remarkById[activeRequest.id]
       ? remarkById[activeRequest.id]
@@ -347,7 +339,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
   const statusChip =
     activeRequest && getStatusChipStyle(activeRequest.status);
 
-  // ⭐ 列表點擊行為：PC 只改 activeId；手機端會切到「詳情」頁
+  // 列表點擊行為：PC 只改 activeId；手機端會切到「詳情」頁
   const handleSelectRequest = (id: string) => {
     setActiveId(id);
     if (typeof window !== "undefined" && window.innerWidth < 768) {
@@ -362,7 +354,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
       className="flex flex-1 overflow-hidden"
       style={{ backgroundColor: "#ffffffff" }}
     >
-      {/* --------- Desktop ≥ md：保持原來的左右布局 --------- */}
+      {/* --------- Desktop ≥ md：左右布局，詳情底部有按鈕條 --------- */}
       <div className="hidden md:flex flex-1 overflow-hidden">
         {/* 左側列表 */}
         <div
@@ -459,7 +451,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                     type="button"
                     onClick={() => handleSelectRequest(req.id)}
                     className={cn(
-                      "w-full px-4 py-3 flex items-center gap-3 text-left transition-colors",
+                      "w-full px-4 py-3 flex items-center gap-3 text-left transition-colors min-h-[92px]",
                       activeId === req.id ? "bg-white" : "hover:bg-black/5"
                     )}
                   >
@@ -491,7 +483,8 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                         <span className="text-[11px] text-gray-500 truncate">
                           {renderChannelLabel(
                             req.scanChannel
-                          )} ·{" "}
+                          )}{" "}
+                          ·{" "}
                           {req.vipNumber
                             ? `VIP ${req.vipNumber}`
                             : "New Guest"}
@@ -517,8 +510,9 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
         <div className="flex-1 flex flex-col">
           {activeRequest ? (
             <>
-              {/* 頂部：名字 + 狀態 + 大頭像 */}
-              <div className="px-16 pt-8 pb-6">
+              {/* 上半部分內容可滾動 */}
+              <div className="flex-1 overflow-y-auto px-16 pt-8 pb-8">
+                {/* 頂部：名字 + 狀態 + 時間 */}
                 <div className="flex items-center justify-between mb-6">
                   <div className="flex items-center gap-3">
                     <h2 className="text-lg font-semibold text-[#3a3023]">
@@ -541,6 +535,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                   </div>
                 </div>
 
+                {/* avatar + VIP tag */}
                 <div className="flex flex-col items-center mb-10">
                   <div
                     className="w-20 h-20 rounded-full flex items-center justify-center text-xl font-medium mb-3"
@@ -608,66 +603,72 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                   />
                 </section>
 
-                {/* 底部行動按鈕 */}
-                <div
-                  className="mt-10 px-16 py-4 border-t bg-white"
-                  style={{ borderTopColor: "var(--divider)" }}
-                >
-                  <div className="flex justify-end gap-4">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        activeRequest &&
-                        runAction(activeRequest, "REJECT")
-                      }
-                      disabled={
-                        !!activeRequest &&
-                        actionLoadingId === activeRequest.id
-                      }
-                      className="px-8 py-2.5 rounded-full border text-sm font-medium disabled:opacity-60"
-                      style={{
-                        borderColor: "#f97373",
-                        color: "#b91c1c",
-                        backgroundColor: "white",
-                      }}
-                    >
-                      {activeRequest &&
-                      actionLoadingId === activeRequest.id
-                        ? "Processing..."
-                        : "Reject"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        activeRequest &&
-                        runAction(activeRequest, "APPROVE")
-                      }
-                      disabled={
-                        !!activeRequest &&
-                        actionLoadingId === activeRequest.id
-                      }
-                      className="px-8 py-2.5 rounded-full text-sm font-medium text-white disabled:opacity-60"
-                      style={{ backgroundColor: "#111111" }}
-                    >
-                      {activeRequest &&
-                      actionLoadingId === activeRequest.id
-                        ? "Processing..."
-                        : "Approve"}
-                    </button>
+                {/* 錯誤信息：顯示在內容區底部 */}
+                {error && (
+                  <div className="mt-4 px-3 py-2 text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg">
+                    {error}
                   </div>
+                )}
+              </div>
+
+              {/* 底部行動按鈕：跟隨詳情區底部 */}
+              <div
+                className="px-16 py-4 border-t bg-white shrink-0"
+                style={{ borderTopColor: "var(--divider)" }}
+              >
+                <div className="flex justify-end gap-4">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      activeRequest && runAction(activeRequest, "REJECT")
+                    }
+                    disabled={
+                      !!activeRequest &&
+                      actionLoadingId === activeRequest.id
+                    }
+                    className="px-8 py-2.5 rounded-full border text-sm font-medium disabled:opacity-60"
+                    style={{
+                      borderColor: "#f97373",
+                      color: "#b91c1c",
+                      backgroundColor: "white",
+                    }}
+                  >
+                    {activeRequest &&
+                    actionLoadingId === activeRequest.id
+                      ? "Processing..."
+                      : "Reject"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      activeRequest && runAction(activeRequest, "APPROVE")
+                    }
+                    disabled={
+                      !!activeRequest &&
+                      actionLoadingId === activeRequest.id
+                    }
+                    className="px-8 py-2.5 rounded-full text-sm font-medium text-white disabled:opacity-60"
+                    style={{ backgroundColor: "#111111" }}
+                  >
+                    {activeRequest &&
+                    actionLoadingId === activeRequest.id
+                      ? "Processing..."
+                      : "Approve"}
+                  </button>
                 </div>
               </div>
             </>
           ) : (
-            <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
-              No VIP request selected.
-            </div>
-          )}
-
-          {error && (
-            <div className="px-4 py-2 text-[11px] text-red-600 bg-red-50 border-t border-red-100">
-              {error}
-            </div>
+            <>
+              <div className="flex-1 flex items-center justify-center text-sm text-gray-500">
+                No VIP request selected.
+              </div>
+              {error && (
+                <div className="px-4 py-2 text-[11px] text-red-600 bg-red-50 border-t border-red-100">
+                  {error}
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -711,7 +712,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
               </div>
             </div>
 
-            {/* 內容區：可滾動 */}
+            {/* 內容區：可滾動，底部預留給固定按鈕條 */}
             <div className="flex-1 overflow-y-auto bg-[#F9F8F6] px-6 pt-6 pb-28">
               {/* Avatar + VIP tag */}
               <div className="flex flex-col items-center mb-6">
@@ -783,11 +784,18 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                   placeholder="Notes for acceptance / rejection (optional)"
                 />
               </section>
+
+              {/* 錯誤信息：在內容區內部顯示 */}
+              {error && (
+                <div className="mt-3 px-3 py-2 text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg">
+                  {error}
+                </div>
+              )}
             </div>
 
-            {/* 底部行動按鈕（固定在底部） */}
+            {/* 底部行動按鈕（手機端固定在視口底部） */}
             <div
-              className="flex gap-3 px-4 py-3 bg-white border-t"
+              className="fixed inset-x-0 bottom-0 z-20 flex gap-3 px-4 py-3 bg-white border-t"
               style={{ borderTopColor: "var(--divider)" }}
             >
               <button
@@ -825,16 +833,10 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                   : "Approve"}
               </button>
             </div>
-
-            {error && (
-              <div className="px-4 py-2 text-[11px] text-red-600 bg-red-50 border-t border-red-100">
-                {error}
-              </div>
-            )}
           </>
         ) : (
           <>
-            {/* 列表視圖 */}
+            {/* 列表視圖（手機） */}
             <div
               className="bg-[#F9F8F6] border-b"
               style={{ borderBottomColor: "var(--divider)" }}
@@ -842,7 +844,7 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
               <div className="px-4 pt-4 pb-3">
                 {/* Tabs */}
                 <div className="flex items-center mb-3">
-                  <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+                  <div className="flex items-center gap-4 overflow-x-auto no-scrollbar">
                     {renderStatusTab("PENDING", "Pending", stats.pending)}
                     {renderStatusTab("ALL", "All", stats.all)}
                     {renderStatusTab("APPROVED", "Approved", stats.approved)}
@@ -919,12 +921,12 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                       type="button"
                       onClick={() => handleSelectRequest(req.id)}
                       className={cn(
-                        "w-full px-4 py-3 flex items-center gap-3 text-left transition-colors border-b",
+                        // ✅ 手機列表：高度統一、無分隔線
+                        "w-full px-4 py-3 flex items-center gap-3 text-left transition-colors min-h-[92px]",
                         activeId === req.id
                           ? "bg-white"
                           : "bg-[#F9F8F6] hover:bg-black/5"
                       )}
-                      style={{ borderBottomColor: "var(--divider)" }}
                     >
                       <div className="flex-shrink-0">
                         <div
@@ -954,7 +956,8 @@ export function VipRequestsView({ onPendingCountChange }: VipRequestsViewProps) 
                           <span className="text-[11px] text-gray-500 truncate">
                             {renderChannelLabel(
                               req.scanChannel
-                            )} ·{" "}
+                            )}{" "}
+                            ·{" "}
                             {req.vipNumber
                               ? `VIP ${req.vipNumber}`
                               : "New Guest"}

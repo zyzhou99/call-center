@@ -1055,14 +1055,14 @@ export function VipListView() {
                       {saving ? "更新中…" : "更新资料"}
                     </button>
 
-                    {!hasAnyName && (
+                    {/* {!hasAnyName && (
                       <span
                         className="text-[11px]"
                         style={{ color: "#B91C1C" }}
                       >
                         请至少填写姓名相关的其中一项。
                       </span>
-                    )}
+                    )} */}
                     {!hasVipNumber && (
                       <span
                         className="text-[11px]"

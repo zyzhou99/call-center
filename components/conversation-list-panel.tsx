@@ -19,7 +19,7 @@ interface ConversationListPanelProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   messagesState: Record<string, Message[]>;
-  // 🔍 新增：全局搜索结果 & 点击事件
+  // 🔍 全局搜索结果 & 点击事件
   searchResults: Conversation[];
   onSearchResultSelect: (conversationId: string) => void;
 }
@@ -40,7 +40,7 @@ export function ConversationListPanel({
 
   return (
     <div
-      className="w-full md:w-96 flex flex-col relative z-10"
+      className="w-full md:w-96 flex flex-col relative z-10 min-h-0"
       style={{
         backgroundColor: "#F9F8F6",
         borderRight: "1px solid var(--divider)",
@@ -83,7 +83,6 @@ export function ConversationListPanel({
                 </div>
               ) : (
                 searchResults.map((conv) => {
-                  // ⭐ 这里也优先用 preferredName / fullName
                   const displayName =
                     (conv as any).preferredName ||
                     (conv as any).fullName ||
@@ -119,6 +118,7 @@ export function ConversationListPanel({
         </div>
       </div>
 
+      {/* 列表区域：手机端这里会被外层包一层 overflow-y-auto */}
       <div className="flex-1 overflow-y-auto">
         {conversations.map((conversation) => (
           <ConversationRow
@@ -160,7 +160,6 @@ function ConversationRow({
   onClick,
   messages,
 }: ConversationRowProps) {
-  // ⭐ 这里统一算一个 displayName：优先 preferredName，再 fullName，再原来的 displayName
   const displayName =
     (conversation as any).preferredName ||
     (conversation as any).fullName ||
@@ -196,6 +195,8 @@ function ConversationRow({
       onClick={onClick}
       className={cn(
         "w-full px-4 py-3.5 flex items-center space-x-3 transition-colors text-left focus:outline-none",
+        // 👉 手机端固定一个最小高度，PC 端保持原样
+        "min-h-[92px] md:min-h-0",
         isActive ? "" : "hover:bg-black/5"
       )}
       style={{
@@ -238,8 +239,9 @@ function ConversationRow({
           </span>
         </div>
 
+        {/* 👉 room 这行：PC 上保留，手机端隐藏，避免多一行高度 */}
         {conversation.room && (
-          <div className="mb-1">
+          <div className="mb-1 hidden md:block">
             <span
               className="inline-block px-1.5 py-0.5 mb-0.5 text-[10px] font-medium rounded"
               style={{
