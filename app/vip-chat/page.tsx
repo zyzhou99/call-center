@@ -16,6 +16,9 @@ const CONCIERGE_NAME = "Joye Duan";
 // 敏感詞列表
 const SENSITIVE_WORDS = ["赌博", "下注"];
 
+// 30 秒未回覆自動回覆
+const AUTO_REPLY_TIMEOUT_MS = 30_000;
+
 function formatTime(ts: number) {
   const d = new Date(ts);
   return d.toLocaleTimeString("en-US", {
@@ -45,6 +48,11 @@ export default function VipChatPage() {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const warningTimerRef = useRef<any>(null);
 
+  // ⭐ 30 秒自動回覆相關：記錄最近一條 VIP 消息時間 & 定時器
+  const autoReplyTimerRef = useRef<any>(null);
+  const lastVipMessageAtRef = useRef<number | null>(null);
+  const messagesRef = useRef<ChatMessage[]>([]);
+
   // ⭐ 進入 vip-chat 時，把本次會話的 sessionId 記到 localStorage
   useEffect(() => {
     if (!sessionId || typeof window === "undefined") return;
@@ -64,7 +72,9 @@ export default function VipChatPage() {
     const fetchMessages = async () => {
       try {
         const resp = await fetch(
-          `/api/h5/sessions/${encodeURIComponent(sessionId)}/messages?take=100`
+          `/api/h5/sessions/${encodeURIComponent(
+            sessionId
+          )}/messages?take=100`
         );
         const data = await resp.json();
 
@@ -101,14 +111,103 @@ export default function VipChatPage() {
     listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [messages]);
 
-  // 卸載時清理 toast 定時器
+  // 同步最新 messages 到 ref，並在禮賓已回覆時清掉 30 秒自動回覆定時器
+  useEffect(() => {
+    messagesRef.current = messages;
+
+    if (!autoReplyTimerRef.current || !lastVipMessageAtRef.current) return;
+
+    const lastVipAt = lastVipMessageAtRef.current;
+    const hasConciergeReply = messages.some(
+      (m) => m.from === "concierge" && m.createdAt > lastVipAt
+    );
+
+    if (hasConciergeReply) {
+      clearTimeout(autoReplyTimerRef.current);
+      autoReplyTimerRef.current = null;
+      lastVipMessageAtRef.current = null;
+    }
+  }, [messages]);
+
+  // 卸載時清理所有定時器
   useEffect(() => {
     return () => {
       if (warningTimerRef.current) {
         clearTimeout(warningTimerRef.current);
       }
+      if (autoReplyTimerRef.current) {
+        clearTimeout(autoReplyTimerRef.current);
+      }
     };
   }, []);
+
+  // 根據關鍵詞決定要不要立刻自動回覆
+  const getKeywordAutoReplyText = (text: string): string | null => {
+    const trimmed = text.trim();
+    if (!trimmed) return null;
+
+    // b) 包含「急需」
+    if (trimmed.includes("急需")) {
+      return "收到，您的需求已加急处理！";
+    }
+
+    // a) 包含「送」「给」「帮」「幫」
+    const arrangeKeywords = ["送", "给", "帮", "幫", "我想", "需要"];
+    if (arrangeKeywords.some((k) => trimmed.includes(k))) {
+      return "好的，马上为您安排，请您稍等！";
+    }
+
+    return null;
+  };
+
+  // 統一發一條「禮賓端」自動回覆
+  const sendAutoReply = async (text: string) => {
+    if (!sessionId) return;
+    try {
+      await fetch(
+        `/api/h5/sessions/${encodeURIComponent(sessionId)}/messages`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text, from: "agent" }),
+        }
+      );
+    } catch (err) {
+      console.error("auto reply failed:", err);
+    }
+  };
+
+  // 啟動 30 秒未回覆自動回覆定時器
+  const scheduleTimeoutAutoReply = () => {
+    if (!sessionId) return;
+
+    const now = Date.now();
+    lastVipMessageAtRef.current = now;
+
+    if (autoReplyTimerRef.current) {
+      clearTimeout(autoReplyTimerRef.current);
+    }
+
+    autoReplyTimerRef.current = setTimeout(() => {
+      const lastVipAt = lastVipMessageAtRef.current;
+      if (!lastVipAt) return;
+
+      const msgs = messagesRef.current;
+      const hasConciergeReply = msgs.some(
+        (m) => m.from === "concierge" && m.createdAt > lastVipAt
+      );
+      if (hasConciergeReply) {
+        return;
+      }
+
+      void sendAutoReply(
+        "您好，这里是永利皇宫 VIP 礼宾团队，我们已经收到您的信息，将尽快为您安排专人回复。"
+      );
+
+      autoReplyTimerRef.current = null;
+      lastVipMessageAtRef.current = null;
+    }, AUTO_REPLY_TIMEOUT_MS);
+  };
 
   const handleSend = async (e: FormEvent) => {
     e.preventDefault();
@@ -137,7 +236,9 @@ export default function VipChatPage() {
 
     try {
       await fetch(
-        `/api/h5/sessions/${encodeURIComponent(sessionId)}/messages`,
+        `/api/h5/sessions/${encodeURIComponent(
+          sessionId
+        )}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -145,6 +246,17 @@ export default function VipChatPage() {
         }
       );
       // 不做樂觀更新，交給輪詢去同步最新消息
+
+      // ✅ 先按關鍵詞判斷是否需要立即自動回覆
+      const keywordReply = getKeywordAutoReplyText(text);
+      if (keywordReply) {
+        void sendAutoReply(keywordReply);
+        // 命中關鍵詞的情況下，就不再啟動 30 秒兜底自動回覆，避免打擾
+        return;
+      }
+
+      // ✅ 沒有命中關鍵詞 → 啟動 30 秒未回覆自動回覆
+      scheduleTimeoutAutoReply();
     } catch (err) {
       console.error("send h5 message failed:", err);
     }

@@ -1164,7 +1164,7 @@ export function VipListView() {
         className={cn(
           "flex flex-col bg-white transition-transform duration-300 min-h-0",
           isMobile
-            ? "fixed inset-y-0 right-0 w-[90%] max-w-sm z-40 shadow-xl"
+            ? "fixed inset-y-0 right-0 w-[75%] max-w-sm z-40 shadow-xl"
             : "w-80",
           isMobile &&
             (mobileRightPanelOpen
