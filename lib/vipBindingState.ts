@@ -1,5 +1,4 @@
 // lib/vipBindingState.ts
-
 type PendingVipBinding = {
   vipGuestId: string;
   vipNumber: string;
@@ -8,14 +7,8 @@ type PendingVipBinding = {
 
 const pendingByOpenKfid = new Map<string, PendingVipBinding>();
 
-// 挂起 10 分钟还没用就当作过期
 const EXPIRE_MS = 10 * 60 * 1000;
 
-/**
- * 在 /api/vip/verify 那里调用：
- * 表示：这个 openKfid 「下一位刚来聊天的客人」
- * 要和哪个 VIP 绑定。
- */
 export function setPendingVipBinding(
   openKfid: string,
   vipGuestId: string,
@@ -30,10 +23,6 @@ export function setPendingVipBinding(
   console.log("[vipBinding] set pending", { openKfid, vipGuestId, vipNumber });
 }
 
-/**
- * 在 /api/wecom/callback 那里调用：
- * 拿出并消费这个「待绑定 VIP」记录。
- */
 export function consumePendingVipBinding(
   openKfid: string
 ): PendingVipBinding | null {

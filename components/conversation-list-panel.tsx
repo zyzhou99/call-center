@@ -19,7 +19,7 @@ interface ConversationListPanelProps {
   searchQuery: string;
   onSearchChange: (query: string) => void;
   messagesState: Record<string, Message[]>;
-  // 🔍 新增：全局搜索结果 & 点击事件
+  // 🔍 全局搜索结果 & 点击事件
   searchResults: Conversation[];
   onSearchResultSelect: (conversationId: string) => void;
 }
@@ -40,7 +40,7 @@ export function ConversationListPanel({
 
   return (
     <div
-      className="w-96 flex flex-col"
+      className="w-full md:w-96 flex flex-col relative z-10 min-h-0"
       style={{
         backgroundColor: "#F9F8F6",
         borderRight: "1px solid var(--divider)",
@@ -49,7 +49,6 @@ export function ConversationListPanel({
       <div
         className="p-4"
         style={{
-          // borderBottom: "1px solid var(--divider)",
           backgroundColor: "#F9F8F6",
         }}
       >
@@ -83,35 +82,43 @@ export function ConversationListPanel({
                   {t("search.noResults") ?? "No matching conversations"}
                 </div>
               ) : (
-                searchResults.map((conv) => (
-                  <button
-                    key={conv.id}
-                    type="button"
-                    onClick={() => onSearchResultSelect(conv.id)}
-                    className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-black/5"
-                  >
-                    <span
-                      className="truncate text-sm"
-                      style={{ color: "var(--text-primary)" }}
+                searchResults.map((conv) => {
+                  const displayName =
+                    (conv as any).preferredName ||
+                    (conv as any).fullName ||
+                    conv.displayName;
+
+                  return (
+                    <button
+                      key={conv.id}
+                      type="button"
+                      onClick={() => onSearchResultSelect(conv.id)}
+                      className="w-full px-3 py-2 flex items-center justify-between text-left hover:bg-black/5"
                     >
-                      {conv.displayName}
-                    </span>
-                    {conv.lastMessagePreview && (
                       <span
-                        className="ml-2 text-xs truncate"
-                        style={{ color: "var(--text-secondary)" }}
+                        className="truncate text-sm"
+                        style={{ color: "var(--text-primary)" }}
                       >
-                        {conv.lastMessagePreview}
+                        {displayName}
                       </span>
-                    )}
-                  </button>
-                ))
+                      {conv.lastMessagePreview && (
+                        <span
+                          className="ml-2 text-xs truncate"
+                          style={{ color: "var(--text-secondary)" }}
+                        >
+                          {conv.lastMessagePreview}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })
               )}
             </div>
           )}
         </div>
       </div>
 
+      {/* 列表区域：手机端这里会被外层包一层 overflow-y-auto */}
       <div className="flex-1 overflow-y-auto">
         {conversations.map((conversation) => (
           <ConversationRow
@@ -153,9 +160,15 @@ function ConversationRow({
   onClick,
   messages,
 }: ConversationRowProps) {
-  const initials = conversation.displayName
+  const displayName =
+    (conversation as any).preferredName ||
+    (conversation as any).fullName ||
+    conversation.displayName;
+
+  const initials = displayName
     .split(" ")
-    .map((n) => n[0])
+    .filter(Boolean)
+    .map((n: string) => n[0] || "")
     .join("")
     .toUpperCase()
     .slice(0, 2);
@@ -165,7 +178,6 @@ function ConversationRow({
   const lastMessage = getLastMessage(messages);
   const previewFromMessages = getMessagePreview(lastMessage);
 
-  // ✅ 优先用后端 /api/wecom/sessions 返回的 lastMessagePreview
   const lastMessagePreview =
     typeof (conversation as any).lastMessagePreview === "string"
       ? (conversation as any).lastMessagePreview.trim()
@@ -183,13 +195,14 @@ function ConversationRow({
       onClick={onClick}
       className={cn(
         "w-full px-4 py-3.5 flex items-center space-x-3 transition-colors text-left focus:outline-none",
+        // 👉 手机端固定一个最小高度，PC 端保持原样
+        "min-h-[92px] md:min-h-0",
         isActive ? "" : "hover:bg-black/5"
       )}
       style={{
         backgroundColor: isActive ? "#FFFFFF" : "transparent",
       }}
     >
-      {/* ✅ 不再渲染左侧竖线，直接从头像开始 */}
       <div className="flex-shrink-0">
         <div
           className="w-12 h-12 rounded-full flex items-center justify-center text-sm font-medium"
@@ -209,14 +222,14 @@ function ConversationRow({
               className="font-medium truncate"
               style={{ color: "var(--text-primary)" }}
             >
-              {conversation.displayName}
+              {displayName}
             </span>
-            {/* {vipColor && (
+            {vipColor && (
               <div
                 className="flex-shrink-0 w-2.5 h-2.5 transform rotate-45"
                 style={{ backgroundColor: vipColor }}
               />
-            )} */}
+            )}
           </div>
           <span
             className="text-xs flex-shrink-0 ml-2"
@@ -226,8 +239,9 @@ function ConversationRow({
           </span>
         </div>
 
+        {/* 👉 room 这行：PC 上保留，手机端隐藏，避免多一行高度 */}
         {conversation.room && (
-          <div className="mb-1">
+          <div className="mb-1 hidden md:block">
             <span
               className="inline-block px-1.5 py-0.5 mb-0.5 text-[10px] font-medium rounded"
               style={{
@@ -257,4 +271,3 @@ function ConversationRow({
     </button>
   );
 }
-

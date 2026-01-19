@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Conversation, Message } from "@/types";
-import { Phone, Smile, Paperclip, Mic, Send } from "lucide-react";
+import { Phone, Smile, Paperclip, Mic, Send, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useLanguage } from "@/contexts/language-context";
 
@@ -10,14 +10,26 @@ interface ChatPanelProps {
   conversation: Conversation | null;
   messages: Message[];
   onSendMessage: (text: string) => void;
+  // ⭐ 手機端點擊返回列表
+  onMobileBack?: () => void;
+  // ⭐ 新增：點擊 header 裡的头像（給 Inbox 開 VIP panel 用）
+  onHeaderAvatarClick?: () => void;
+  // ⭐ 新增：是否讓 header 吸頂（主要是 mobile）
+  stickyHeader?: boolean;
 }
 
 export function ChatPanel({
   conversation,
   messages,
   onSendMessage,
+  onMobileBack,
+  onHeaderAvatarClick,
+  stickyHeader,
 }: ChatPanelProps) {
   const [messageText, setMessageText] = useState("");
+  const [status, setStatus] = useState<"open" | "resolved">("open");
+  const [showStatusMenu, setShowStatusMenu] = useState(false);
+  const statusText = status === "open" ? "打开" : "已解决";
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { t } = useLanguage();
 
@@ -54,9 +66,25 @@ export function ChatPanel({
     );
   }
 
-  const initials = conversation.displayName
+  // ✅ 统一显示名字：优先用 vipGuest.preferredName，其次 vipGuest.fullName，最后才用原来的 displayName
+  const vipPreferredName =
+    (conversation as any).vipPreferredName ??
+    (conversation as any).vipGuest?.preferredName ??
+    null;
+  const vipFullName =
+    (conversation as any).vipFullName ??
+    (conversation as any).vipGuest?.fullName ??
+    null;
+
+  const displayName =
+    (vipPreferredName && String(vipPreferredName).trim()) ||
+    (vipFullName && String(vipFullName).trim()) ||
+    conversation.displayName;
+
+  const initials = displayName
     .split(" ")
-    .map((n) => n[0])
+    .filter(Boolean)
+    .map((part: string) => part[0] ?? "")
     .join("")
     .toUpperCase()
     .slice(0, 2);
@@ -68,37 +96,103 @@ export function ChatPanel({
 
   return (
     <div className="flex-1 flex flex-col bg-white">
-      {/* 顶部：头像 + 名字 + 电话按钮 */}
+      {/* 顶部：返回（手機）+ 头像 + 名字 + 电话按钮 */}
       <div
-        className="px-6 py-4 flex items-center justify-between"
+        className={cn(
+          "px-4 py-3 md:px-6 md:py-4 flex items-center justify-between bg-white",
+          // ⭐ 如果 stickyHeader 為 true，就讓 header 吸頂
+          stickyHeader && "sticky top-0 z-10"
+        )}
         style={{ borderBottom: "1px solid var(--divider)" }}
       >
         <div className="flex items-center space-x-3">
-          <div
+          {/* ⭐ 手機端的返回按鈕：只在 < md 並且有 onMobileBack 時顯示 */}
+          {onMobileBack && (
+            <button
+              type="button"
+              onClick={onMobileBack}
+              className="mr-1 flex h-8 w-8 items-center justify-center rounded-full border border-[#e4d4bd] md:hidden"
+            >
+              <span className="text-lg text-[#4b3a2b]">‹</span>
+            </button>
+          )}
+
+          {/* ⭐ 头像改成 button，點擊時調用 onHeaderAvatarClick（如果有） */}
+          <button
+            type="button"
+            onClick={onHeaderAvatarClick}
             className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-medium"
             style={{
               backgroundColor: "var(--avatar-bg)",
               color: "var(--accent)",
+              cursor: onHeaderAvatarClick ? "pointer" : "default",
             }}
           >
             {initials}
-          </div>
+          </button>
+
           <div>
             <h2
               className="font-medium"
               style={{ color: "var(--text-primary)" }}
             >
-              {conversation.displayName}
+              {displayName}
             </h2>
           </div>
         </div>
 
-        <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
-          <Phone
-            className="w-5 h-5"
-            style={{ color: "var(--text-primary)" }}
-          />
-        </button>
+        {/* 右側：狀態下拉 + 電話按鈕 */}
+        <div className="flex items-center space-x-3 relative">
+          {/* 狀態按鈕 + 下拉菜單 */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setShowStatusMenu((v) => !v)}
+              className="px-4 py-2 rounded-full border text-sm flex items-center gap-1 hover:bg-[#f7f5f2]"
+              style={{
+                borderColor: "var(--divider)",
+                color: "var(--text-primary)",
+                backgroundColor: "#ffffff",
+              }}
+            >
+              <span>{statusText}</span>
+              <ChevronDown className="w-4 h-4" />
+            </button>
+
+            {showStatusMenu && (
+              <div className="absolute right-0 mt-2 w-24 bg-white rounded-xl shadow-lg border text-sm py-1 z-10">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus("open");
+                    setShowStatusMenu(false);
+                  }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#f7f5f2]"
+                >
+                  打开
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStatus("resolved");
+                    setShowStatusMenu(false);
+                  }}
+                  className="w-full px-3 py-1.5 text-left hover:bg-[#f7f5f2]"
+                >
+                  已解决
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* 電話按鈕（原樣保留） */}
+          <button className="p-2 rounded-full transition-colors hover:bg-gray-100">
+            <Phone
+              className="w-5 h-5"
+              style={{ color: "var(--text-primary)" }}
+            />
+          </button>
+        </div>
       </div>
 
       {/* 中间内容：根据 channel 切换 UI */}
@@ -148,7 +242,7 @@ export function ChatPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      {/* 底部输入框：保持你原来的样式 & 逻辑 */}
+      {/* 底部输入框：保持你原来的样式 & 逻辑；已經固定在底部 */}
       <div
         className="px-6 py-4"
         style={{ borderTop: "1px solid var(--divider)" }}
@@ -357,7 +451,7 @@ function PhoneCallItem({ message }: PhoneCallItemProps) {
       {/* 可选 Summary：只有有文字的时候才显示 */}
       {message.text && message.text.trim().length > 0 && (
         <div
-          className="mt-1 rounded-md px-3 py-2 bg-white border border-[var(--divider)]"
+          className="mt-1 rounded-md px-3 py-2 bg白 border border-[var(--divider)]"
           style={{ color: "var(--text-primary)" }}
         >
           <div

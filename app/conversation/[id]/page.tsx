@@ -193,6 +193,8 @@ function ConversationContent() {
       webchat: 0,
       email: 0,
       phone: 0,
+      vipRequests: 0,
+      vipContacts: 0,
     };
 
     mockConvs.forEach((conv) => {

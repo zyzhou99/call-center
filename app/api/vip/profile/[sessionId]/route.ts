@@ -54,7 +54,9 @@ export async function GET(_req: Request, { params }: Params) {
         : "",
       segment: g.segment || "",
       statusLabel: g.statusLabel || "",
-      notes: g.notes || "",
+      preference: g.preference || "",
+      restriction: g.restriction || "",
+      remark: g.remark || "",
     };
 
     return NextResponse.json({

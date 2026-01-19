@@ -9,6 +9,9 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit"
   },
+  "prisma": {
+    "seed": "node prisma/seed.js"
+  },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
     "@netlify/plugin-nextjs": "^5.15.1",
@@ -73,8 +76,8 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@prisma/client": "5.16.2",
+    "@prisma/client": "^5.22.0",
     "dotenv-cli": "^11.0.0",
-    "prisma": "5.16.2"
+    "prisma": "^5.22.0"
   }
 }

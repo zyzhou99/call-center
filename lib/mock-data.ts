@@ -279,8 +279,7 @@ export const mockMessages: Record<string, Message[]> = {
       id: 'm14',
       conversationId: '6',
       direction: 'out',
-      text:
-        'Prepare wine in the room',
+      text: 'Prepare wine in the room',
       timeLabel: '6:12 PM',
       timestamp: NOW - 10 * HOUR + 120_000,
     },
@@ -373,6 +372,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-D-10234',
     notes:
       'Drinks coffee every morning at 7 AM. Prefers non-smoking rooms. Enjoys Cuban cigars - favorite brand is Cohiba.',
+    remark: '',
+    preference: 'coffee in the morning,non-smoking room,Cuban cigars,Cohiba brand',
+    restriction: '',
   },
   '2': {
     conversationId: '2',
@@ -387,6 +389,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-G-45821',
     notes:
       'Allergic to feather pillows. Prefers high floor with city view.',
+    remark: '',
+    preference: 'high floor,city view',
+    restriction: 'feather pillows',
   },
   '3': {
     conversationId: '3',
@@ -401,6 +406,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-P-29384',
     notes:
       'Frequent business traveler. Prefers early check-in when available.',
+    remark: '',
+    preference: 'early check-in,business traveler amenities',
+    restriction: '',
   },
   '4': {
     conversationId: '4',
@@ -415,6 +423,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-R-77492',
     notes:
       'Traveling with family. Requested extra towels and toiletries.',
+    remark: '',
+    preference: 'family-friendly services,extra towels,extra toiletries',
+    restriction: '',
   },
   '5': {
     conversationId: '5',
@@ -429,6 +440,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-B-19283',
     notes:
       'Regular spa guest. Prefers Swedish massage. Enjoys afternoon tea service.',
+    remark: '',
+    preference: 'spa services,Swedish massage,afternoon tea',
+    restriction: '',
   },
   '6': {
     conversationId: '6',
@@ -443,6 +457,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-C-00123',
     notes:
       'VIP Chairman tier. Prefers suite with private butler service. Enjoys fine dining and wine tasting.',
+    remark: '',
+    preference: 'suite,private butler service,fine dining,wine tasting',
+    restriction: '',
   },
   '7': {
     conversationId: '7',
@@ -457,6 +474,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-P-55091',
     notes:
       'Prefers quiet rooms away from elevators. Enjoys room service breakfast.',
+    remark: '',
+    preference: 'quiet room,away from elevators,room service breakfast',
+    restriction: '',
   },
   '8': {
     conversationId: '8',
@@ -471,6 +491,9 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-G-33187',
     notes:
       'Gym enthusiast. Requests wake-up calls at 6 AM. Enjoys protein-rich breakfast.',
+    remark: '',
+    preference: 'gym access,wake-up call at 6 AM,protein-rich breakfast',
+    restriction: '',
   },
   '9': {
     conversationId: '9',
@@ -485,5 +508,8 @@ export const mockProfiles: Record<string, GuestProfile> = {
     vipNumber: 'VIP-D-88204',
     notes:
       'Tech-savvy guest. Appreciates smart room features. Prefers digital check-in/out.',
+    remark: '',
+    preference: 'smart room features,digital check-in,digital check-out',
+    restriction: '',
   },
 };

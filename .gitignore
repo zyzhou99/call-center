@@ -50,3 +50,4 @@ node_modules
 
 # sqlite db
 prisma/*.db
+prisma/prisma/dev.db

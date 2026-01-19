@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       ];
     }
 
-    // ⭐ 关键：把 vipGuest 一起查出来
+    // ⭐ 把 vipGuest 一起查出來
     const sessions = await prisma.session.findMany({
       where,
       orderBy: { lastMsgAt: "desc" },
@@ -45,17 +45,27 @@ export async function GET(req: NextRequest) {
     const items = sessions.map((s) => {
       const g = s.vipGuest;
 
+      const displayNameFromVip =
+        (g?.preferredName as string | null) ||
+        (g?.fullName as string | null) ||
+        null;
+
       return {
         id: s.id,
         openKfid: s.openKfid,
         externalUserId: s.externalUserId,
-        displayName: s.displayName,
+        // ⭐ 優先用 VIP 的名字，沒有再 fallback
+        displayName:
+          displayNameFromVip ||
+          s.displayName ||
+          s.externalUserId ||
+          s.id,
         channel: s.channel,
         lastMsgAt: s.lastMsgAt,
         lastMsgPreview: s.lastMsgPreview,
         unreadCount: s.unreadCount,
         vipNumber: s.vipNumber,
-        // ⭐ 这里把 guest 侧边栏需要的字段都整理好
+        // ⭐ 把 vipGuest 結構明確返回給前端
         vipGuest: g
           ? {
               id: g.id,
@@ -68,11 +78,32 @@ export async function GET(req: NextRequest) {
               checkOutDate: g.checkOutDate,
               segment: g.segment,
               statusLabel: g.statusLabel,
-              notes: g.notes,
+              // ⭐ 新增：schema 裡的 preference / restriction
+              preference: g.preference,
+              restriction: g.restriction,
+              // 如果你在 VipGuest 裡加了下面幾個喜好字段，也一起帶出去
+              stayPreference: (g as any).stayPreference ?? null,
+              diningPreference: (g as any).diningPreference ?? null,
+              travelPreference: (g as any).travelPreference ?? null,
+              culturePrivacy: (g as any).culturePrivacy ?? null,
+              other: (g as any).other ?? null,
             }
           : null,
       };
     });
+
+    // ⭐ 方便確認後端到底有沒有 vipGuest
+    console.log(
+      "[/api/wecom/sessions] sample:",
+      items[0]
+        ? {
+            id: items[0].id,
+            displayName: items[0].displayName,
+            vipNumber: items[0].vipNumber,
+            hasVipGuest: !!items[0].vipGuest,
+          }
+        : "no sessions"
+    );
 
     return NextResponse.json({ ok: true, sessions: items });
   } catch (e) {

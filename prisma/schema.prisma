@@ -1,5 +1,4 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
+// prisma/schema.prisma
 
 generator client {
   provider = "prisma-client-js"
@@ -10,9 +9,9 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// -------- Models & Enums（DB 里不用 enum / Json，全部用 String） --------
+// ----------------- Models -----------------
 
-// 用来存每个 OpenKfId 的同步状态（你之前就有的）
+// 企业微信同步状态
 model KfSyncState {
   id        String   @id @default(cuid())
   openKfid  String   @unique
@@ -22,100 +21,186 @@ model KfSyncState {
   createdAt DateTime @default(now())
 }
 
-// VIP guest 基础信息（假的也可以放这里，方便 H5 测试）
+// 酒店 CRM 里的 VIP 档案
 model VipGuest {
-  id            String   @id @default(cuid())
+  id        String  @id @default(cuid())
+  vipNumber String  @unique
 
-  // 用户在 H5 页面输入的 VIP number（唯一）
-  vipNumber     String   @unique
+  // 姓名相关
+  fullName      String          // 兼容旧代码用的全名
+  firstName     String?         // 新增：名
+  lastName      String?         // 新增：姓
+  preferredName String?         // 客人偏好的称呼
 
-  fullName      String
-  preferredName String?
+  // 生日：只存 MMDD（例如 "0323"），用于和用户输入校验（可以没有）
+  birthdayMd String?
 
-  // 原来是 VipTier enum，这里用 String 存，比如 "Diamond" / "Gold"
-  tier          String?
+  /// 行为 / 偏好 / 忌讳点（先保留你原来的命名，后面再慢慢细分也可以）
+  preference  String? // 喜好
+  restriction String? // 不喜欢
 
-  // 这些字段对应你 mockProfiles 里的信息，方便右侧 GuestProfilePanel 展示
-  room          String?
-  checkInDate   DateTime?
-  checkOutDate  DateTime?
-  segment       String?  // Business / Leisure ...
-  statusLabel   String?  // Check in / Check out 等
-  notes         String?
+  // 联系方式 & 头像（以后可以慢慢用上）
+  contactPhone    String?
+  contactEmail    String?
+  profilePhotoUrl String?
 
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  // 住店信息
+  tier         String?
+  room         String?
+  checkInDate  DateTime?
+  checkOutDate DateTime?
+  segment      String?
+  statusLabel  String?
 
-  // 一个 VIP 可以有多次会话记录
-  sessions      Session[]
+  remark       String?
+
+  // 每个 VIP 对应的专属永久二维码（可以存 scene、token 或二维码图片 URL）
+  qrCode String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sessions  Session[]
+  approvals PendingApproval[]
 }
 
-// 一条「会话」= 一个 openKfId + 一个 externalUserId
-// 对应前端的 Conversation
+// 一条「会话」= 一个 openKfId + 一个渠道用户
 model Session {
-  id             String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // 企业微信维度
   openKfid       String
   externalUserId String
 
-  // UI 需要的字段
-  displayName    String?          // 对话顶部 / 列表里显示的名字
+  // 通用渠道 ID：同一个字段可以存
+  // - WeCom: external_userid
+  // - 微信 H5: wechat openid / unionid
+  // - Web H5: 自己生成的 browserId
+  // - WhatsApp: 手机号 等
+  channelIdentifier String?
 
-  // 原来是 Channel enum，这里用 String 存，比如 "wechat" / "whatsapp"
-  channel        String  @default("wechat") // wechat / whatsapp / line ...
+  // 在该渠道看到的昵称 & 头像
+  displayName String?
+  avatarUrl   String?
 
-  lastMsgAt      DateTime?        // 用来排序（最新消息时间）
-  lastMsgPreview String?          // 列表里显示的最后一条摘要
-  unreadCount    Int      @default(0)
+  // 渠道类型：wechat / whatsapp / webchat / email ...
+  channel String @default("wechat")
 
-  // 用户在 H5 页面输入的 VIP 号（冗余一份，方便查）
-  vipNumber      String?
+  lastMsgAt      DateTime?
+  lastMsgPreview String?
+  unreadCount    Int       @default(0)
 
-  // 关联到 VipGuest（如果能匹配上）
-  vipGuestId     String?
-  vipGuest       VipGuest? @relation(fields: [vipGuestId], references: [id])
+  // 绑定后的 VIP 号（冗余一份方便查）
+  vipNumber String?
 
-  createdAt      DateTime @default(now())
-  updatedAt      DateTime @updatedAt
+  // 联系方式（如果渠道能拿到）
+  phoneNumber String?
+  email       String?
 
-  messages       Message[]
+  // 微信专用 ID（可选）
+  wechatOpenId  String?
+  wechatUnionId String?
 
-  // 一个 openKfid + externalUserId 只对应一条会话
+  // 关联到 VipGuest
+  vipGuestId String?
+  vipGuest   VipGuest? @relation(fields: [vipGuestId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  messages Message[]
+
+  // WeCom 一个 openKfId + externalUserId 只对应一条会话
   @@unique([openKfid, externalUserId])
-
   // 快速按客服 + 最新时间排序
   @@index([openKfid, lastMsgAt])
-
-  // 按 VIP 号查会话（后面 H5 用得到）
+  // 按 VIP 号查
   @@index([vipNumber])
+  // 通用渠道 ID 查找
+  @@index([channelIdentifier])
 }
 
-// 单条消息，对应前端的 Message
+// 单条消息
 model Message {
-  id             String   @id @default(cuid())
+  id String @id @default(cuid())
 
   // 企业微信原始字段
   msgId          String   @unique
   openKfid       String
   externalUserId String
-  origin         String?  // 来源标记（比如 "wecom"），可选
-  msgType        String   // text / image / event ...
-  sendTime       DateTime // 企业微信那边的发送时间
+  origin         String?   // 来源标记（比如 "wecom"），可选
+  msgType        String    // text / image / event ...
+  sendTime       DateTime  // 企业微信那边的发送时间
 
   // 原来是 Json，这里用 String 存 JSON 字符串就好
-  payload        String   // 比如存 JSON.stringify(payload)
+  payload String // 比如存 JSON.stringify(payload)
 
-  // 原来是 MessageDirection enum，这里用 String 存 "in" / "out"
-  direction      String          // "in" / "out"，决定气泡朝向
-  text           String?         // 纯文本内容（从 payload 里抽出来）
+  // "in" / "out"
+  direction String
+  text      String? // 纯文本内容（从 payload 里抽出来）
+
+  /// 敏感词标记
+  hasSensitive  Boolean @default(false)
+  sensitiveHits String?
 
   // 关联到会话
-  sessionId      String
-  session        Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sessionId String
+  session   Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  createdAt      DateTime @default(now())
+  createdAt DateTime @default(now())
 
   // 常用查询索引
   @@index([openKfid, externalUserId, sendTime])
+}
+
+// /vip-access 提交之后的待审批记录
+model PendingApproval {
+  id String @id @default(cuid())
+
+  // 用户输入的 VIP 号（无论对不对都会先记）
+  vipNumber  String?
+  vipGuestId String?
+  vipGuest   VipGuest? @relation(fields: [vipGuestId], references: [id])
+
+  /// 用户在 /vip-access 输入的东西
+  inputPreferredName String?
+  inputBirthdayMd    String? // 用户输入的 MMDD，比如 "0323"
+
+  /// 扫码渠道带来的身份信息（用于人工核对）
+  inputChannelIdentifier String? // openid / browserId / phone 等
+  inputDisplayName       String? // 微信昵称等
+  inputAvatarUrl         String?
+  inputPhoneNumber       String?
+
+  /// 当前 POC 版本 & 入口模式 & 扫码渠道
+  /// version:     'hybrid' | 'h5'
+  /// entryMode:   'wecom'  | 'h5'
+  /// scanChannel: 'wechat' | 'browser'
+  version     String
+  entryMode   String
+  scanChannel String
+
+  /// 审批状态
+  /// 'PENDING'  : 待审核
+  /// 'APPROVED' : 已通过
+  /// 'REJECTED' : 已拒绝
+  /// 'EXPIRED'  : 已过期（后面可选用）
+  status String  @default("PENDING")
+  reason String?
+
+  /// 审批结果：
+  /// WeCom 版：kfUrl —— 前端跳转企业微信客服
+  /// H5 版：sessionId —— 前端跳转 /vip-chat
+  kfUrl     String?
+  sessionId String?
+
+  /// 哪个客服接手/审批了（相当于 assigned，会话分配给谁）
+  assignedAgentId String?
+  assignedAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([vipNumber])
 }
