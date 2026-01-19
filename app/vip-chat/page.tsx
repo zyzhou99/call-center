@@ -14,10 +14,50 @@ interface ChatMessage {
 const CONCIERGE_NAME = "Joye Duan";
 
 // 敏感詞列表
-const SENSITIVE_WORDS = ["赌博", "下注"];
+const SENSITIVE_WORDS = [
+  "赌博",
+  "赌钱",
+  "下注",
+  "洗码",
+  "高利贷",
+  "赌债",
+  "筹码",
+  "砖码",
+  "扑克",
+  "牌九",
+  "轮盘",
+  "赌桌",
+  "吸毒",
+  "贩毒",
+  "毒品",
+  "卖淫",
+  "洗钱",
+  "卧槽",
+  "傻逼",
+  "妈的",
+  "混蛋",
+  "垃圾",
+  "自杀",
+  "杀人",
+  "爆炸",
+  "炸弹",
+  "袭击",
+  "护照号",
+  "银行卡",
+  "密码",
+  "作孽",
+  "出千",
+  "申通",
+  "政治",
+  "宗教",
+  "种族",
+];
 
 // 30 秒未回覆自動回覆
 const AUTO_REPLY_TIMEOUT_MS = 30_000;
+
+// 關鍵詞自動回覆延遲（5 秒）
+const KEYWORD_AUTO_REPLY_DELAY_MS = 5_000;
 
 function formatTime(ts: number) {
   const d = new Date(ts);
@@ -141,20 +181,20 @@ export default function VipChatPage() {
     };
   }, []);
 
-  // 根據關鍵詞決定要不要立刻自動回覆
+  // 根據關鍵詞決定要不要自動回覆（只負責判斷 + 文案）
   const getKeywordAutoReplyText = (text: string): string | null => {
     const trimmed = text.trim();
     if (!trimmed) return null;
 
     // b) 包含「急需」
     if (trimmed.includes("急需")) {
-      return "收到，您的需求已加急处理！";
+      return "收到，您的需求已加急處理！";
     }
 
     // a) 包含「送」「给」「帮」「幫」
     const arrangeKeywords = ["送", "给", "帮", "幫", "我想", "需要"];
     if (arrangeKeywords.some((k) => trimmed.includes(k))) {
-      return "好的，马上为您安排，请您稍等！";
+      return "好的，馬上為您安排，請您稍等！";
     }
 
     return null;
@@ -236,9 +276,7 @@ export default function VipChatPage() {
 
     try {
       await fetch(
-        `/api/h5/sessions/${encodeURIComponent(
-          sessionId
-        )}/messages`,
+        `/api/h5/sessions/${encodeURIComponent(sessionId)}/messages`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -247,10 +285,13 @@ export default function VipChatPage() {
       );
       // 不做樂觀更新，交給輪詢去同步最新消息
 
-      // ✅ 先按關鍵詞判斷是否需要立即自動回覆
+      // ✅ 先按關鍵詞判斷是否需要自動回覆（改為 10 秒後發）
       const keywordReply = getKeywordAutoReplyText(text);
       if (keywordReply) {
-        void sendAutoReply(keywordReply);
+        setTimeout(() => {
+          void sendAutoReply(keywordReply);
+        }, KEYWORD_AUTO_REPLY_DELAY_MS);
+
         // 命中關鍵詞的情況下，就不再啟動 30 秒兜底自動回覆，避免打擾
         return;
       }
@@ -267,7 +308,7 @@ export default function VipChatPage() {
 
   if (!sessionId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center bg白">
         <div className="text-sm text-gray-500">
           Missing session. Please go back and start the chat again.
         </div>
@@ -278,7 +319,7 @@ export default function VipChatPage() {
   return (
     <div className="fixed inset-0 bg-white flex">
       {/* 自适应手機寬度，不再寫死 max-w */}
-      <div className="w-full flex flex-col bg-white overflow-hidden relative">
+      <div className="w-full flex flex-col bg白 overflow-hidden relative">
         {/* 頂部導航欄（置頂） */}
         <div className="h-14 px-4 flex items-center border-b border-[#f0ece6] flex-shrink-0">
           <button

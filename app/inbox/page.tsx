@@ -1288,6 +1288,11 @@ function InboxContent() {
     "line",
   ];
 
+   // 当前是否有属于当前 channel 的已选会话（PC 右侧是否展示聊天）
+  const hasActiveConversationInChannel =
+    !!activeConversation &&
+    activeConversation.channel === activeChannel;
+
   // ⭐ 小组件：统一的 VIP 请求弹窗卡片内容
   const VipRequestPopupCard = () => (
     <div className="w-full max-w-sm rounded-2xl shadow-xl border border-[#e6dfd2] bg-white px-4 py-3">
@@ -1782,6 +1787,7 @@ function InboxContent() {
   }
 
   // 🟢 PC 端：保持你之前的三栏布局完全不变
+    // 🟢 PC 端：三栏布局 + 右侧空态占位
   return (
     <AppShell>
       <LeftChannelRail
@@ -1817,16 +1823,35 @@ function InboxContent() {
 
               <div className="flex-1 flex flex-col overflow-hidden">
                 <div className="flex-1 flex overflow-hidden">
-                  <ChatPanel
-                    conversation={activeConversation}
-                    messages={activeMessages}
-                    onSendMessage={handleSendMessage}
-                  />
+                  {hasActiveConversationInChannel ? (
+                    <>
+                      <ChatPanel
+                        conversation={activeConversation}
+                        messages={activeMessages}
+                        onSendMessage={handleSendMessage}
+                      />
 
-                  <GuestProfilePanel
-                    profile={activeProfile}
-                    onCloseConversation={handleCloseConversation}
-                  />
+                      <GuestProfilePanel
+                        profile={activeProfile}
+                        onCloseConversation={handleCloseConversation}
+                      />
+                    </>
+                  ) : (
+                    // ✅ 没有当前 channel 的会话选中时，显示通用空态页面
+                    <div className="flex-1 flex items-center justify-center bg-white">
+                      <div className="flex flex-col items-center text-center">
+                        <div className="w-16 h-16 rounded-full bg-[#f7ecdb] flex items-center justify-center mb-4 shadow-sm">
+                          <MessageCircle
+                            className="w-7 h-7"
+                            style={{ color: "#d3a56b" }}
+                          />
+                        </div>
+                        <p className="text-sm text-[#b8b0a3]">
+                          请从左侧列表中选择一个项目开始处理。
+                        </p>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             </>

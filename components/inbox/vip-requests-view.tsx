@@ -36,6 +36,9 @@ interface VipRequestItem {
   reason?: string | null;
 
   vipGuest?: VipGuestLite | null;
+
+  // ⭐ 决策时间（后端如果有 updatedAt 就会带上）
+  updatedAt?: string | null;
 }
 
 interface VipApprovalsApiResponse {
@@ -106,6 +109,14 @@ const getStatusChipStyle = (status: VipRequestStatus) => {
   }
 };
 
+// ⭐ Decision Time 展示用：逻辑只在 UI 层
+const getDecisionTimeText = (req?: VipRequestItem | null) => {
+  if (!req) return "—";
+  if (req.status === "PENDING") return "Pending";
+  if (req.updatedAt) return formatDateTime(req.updatedAt);
+  return "—";
+};
+
 export function VipRequestsView({
   onPendingCountChange,
   onNewPendingRequest, // ⭐ 新增
@@ -130,11 +141,25 @@ export function VipRequestsView({
   // ⭐ 新增：記錄「目前已知的最新 Pending request 的 createdAt」
   const lastPendingCreatedAtRef = useRef<number | null>(null);
 
+  // ⭐ UI：尽量减少“跳动”——静默刷新前后保留列表滚动位置（只影响 UI）
+  const desktopListRef = useRef<HTMLDivElement | null>(null);
+  const mobileListRef = useRef<HTMLDivElement | null>(null);
+  const preserveScrollTopRef = useRef<number | null>(null);
+
   // ------- data fetching -------
 
   const refresh = useCallback(
     async (opts?: { silent?: boolean }) => {
       const silent = opts?.silent ?? false;
+
+      // ✅ 仅 UI：静默刷新前记录当前列表 scrollTop，刷新后恢复
+      if (silent) {
+        const el =
+          (desktopListRef.current as HTMLDivElement | null) ??
+          (mobileListRef.current as HTMLDivElement | null);
+        if (el) preserveScrollTopRef.current = el.scrollTop;
+      }
+
       if (!silent) {
         setLoading(true);
         setError(null);
@@ -158,6 +183,19 @@ export function VipRequestsView({
         );
 
         setRequests(list);
+
+        // ✅ 仅 UI：恢复 scrollTop（在 DOM 更新后）
+        if (silent) {
+          const top = preserveScrollTopRef.current;
+          if (typeof top === "number") {
+            requestAnimationFrame(() => {
+              const el =
+                (desktopListRef.current as HTMLDivElement | null) ??
+                (mobileListRef.current as HTMLDivElement | null);
+              if (el) el.scrollTop = top;
+            });
+          }
+        }
 
         // 把已有的 reason 同步到備註裡（第一次打開時可以看到歷史備註）
         setRemarkById((prev) => {
@@ -212,7 +250,7 @@ export function VipRequestsView({
         setActionLoadingId(null);
       }
     },
-    [onPendingCountChange, onNewPendingRequest] // ⭐ 記得把新回調放進依賴
+    [onPendingCountChange, onNewPendingRequest]
   );
 
   // 首次加载
@@ -338,6 +376,7 @@ export function VipRequestsView({
     return scanChannel;
   };
 
+  // ⭐ Tabs：选中时文字变深+底下金色横线
   const renderStatusTab = (
     key: StatusTab,
     label: string,
@@ -349,15 +388,25 @@ export function VipRequestsView({
         key={key}
         type="button"
         onClick={() => setStatusTab(key)}
-        className={cn(
-          "px-2.5 py-1 text-[11px] rounded-full transition-colors whitespace-nowrap",
-          isActive
-            ? "bg-black text-white"
-            : "text-[#7d6b5c] hover:bg-black/5"
-        )}
+        className="relative flex flex-col items-center px-1 pb-1 text-[12px] font-medium whitespace-nowrap"
       >
-        {label}{" "}
-        <span className="text-[10px] opacity-70">{`(${count})`}</span>
+        <span
+          className={cn(
+            isActive
+              ? "text-[#3a3023]"
+              : "text-[#b49b7b] hover:text-[#3a3023]"
+          )}
+        >
+          {label}{" "}
+          <span className="text-[10px] opacity-70">{`(${count})`}</span>
+        </span>
+        <span
+          className={cn(
+            "mt-1 h-[2px] rounded-full transition-all",
+            isActive ? "w-6" : "w-0"
+          )}
+          style={isActive ? { backgroundColor: "#d6ae5a" } : {}}
+        />
       </button>
     );
   };
@@ -371,6 +420,9 @@ export function VipRequestsView({
 
   const statusChip =
     activeRequest && getStatusChipStyle(activeRequest.status);
+
+  // ⭐ UI：已处理就隐藏按钮（不改任何业务逻辑）
+  const isDecided = !!activeRequest && activeRequest.status !== "PENDING";
 
   // 列表點擊行為：PC 只改 activeId；手機端會切到「詳情」頁
   const handleSelectRequest = (id: string) => {
@@ -387,43 +439,46 @@ export function VipRequestsView({
       className="flex flex-1 overflow-hidden"
       style={{ backgroundColor: "#ffffffff" }}
     >
-      {/* --------- Desktop ≥ md：左右布局，詳情底部有按鈕條 --------- */}
+      {/* --------- Desktop ≥ md：左右布局 --------- */}
       <div className="hidden md:flex flex-1 overflow-hidden">
-        {/* 左側列表 */}
+        {/* 左側列表（宽度 w-96 对齐其他页面） */}
         <div
-          className="relative z-10 w-96 flex flex-col border-r"
+          className="relative z-10 w-96 flex flex-col"
           style={{
             backgroundColor: "#F9F8F6",
-            borderRightColor: "var(--divider)",
+            borderRight: "1px solid var(--divider)",
           }}
         >
-          {/* header */}
-          <div
-            className="px-4 pt-4 pb-3 border-b"
-            style={{ borderBottomColor: "var(--divider)" }}
-          >
-            <div className="flex items-center justify-between mb-2">
-              <p
-                className="text-xs font-semibold tracking-[0.18em] uppercase"
-                style={{ color: "#b28a4a" }}
-              >
-                VIP Requests
-              </p>
+          {/* header：对齐 vip-list-view 风格 */}
+          <div className="p-4" style={{ backgroundColor: "#F9F8F6" }}>
+            {/* 搜索框 */}
+            <div className="mb-3">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name or VIP number..."
+                className="w-full px-4 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-opacity-20"
+                style={{
+                  backgroundColor: "#FFFFFF",
+                  border: "1px solid var(--divider)",
+                  color: "var(--text-primary)",
+                  // @ts-expect-error: css var
+                  "--tw-ring-color": "var(--accent)",
+                }}
+              />
             </div>
 
-            <div className="flex items-center justify-between mb-2">
-              <div className="flex items-center gap-1.5">
-                {renderStatusTab("PENDING", "Pending", stats.pending)}
-                {renderStatusTab("ALL", "All", stats.all)}
-                {renderStatusTab("APPROVED", "Approved", stats.approved)}
-                {renderStatusTab("REJECTED", "Rejected", stats.rejected)}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2">
+            {/* Channel filter */}
+            <div className="flex items-center gap-2 mb-3">
               <select
-                className="w-full px-3 py-1.5 rounded-md text-[11px] border bg-white"
-                style={{ borderColor: "var(--divider)", color: "#4b3a2b" }}
+                className="w-full px-3 py-2.5 rounded-lg text-sm border bg-white focus:outline-none focus:ring-2 focus:ring-opacity-20"
+                style={{
+                  borderColor: "var(--divider)",
+                  color: "var(--text-primary)",
+                  // @ts-expect-error: css var
+                  "--tw-ring-color": "var(--accent)",
+                }}
                 value={channelFilter}
                 onChange={(e) =>
                   setChannelFilter(e.target.value as ChannelFilter)
@@ -435,31 +490,33 @@ export function VipRequestsView({
               </select>
             </div>
 
-            {/* 搜索框 */}
-            <div className="mt-2">
-              <input
-                type="text"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search by name or VIP number..."
-                className="w-full px-3 py-1.5 rounded-md text-[11px] border bg-white focus:outline-none focus:ring-1"
-                style={{
-                  borderColor: "var(--divider)",
-                  // @ts-expect-error: css var
-                  "--tw-ring-color": "var(--accent)",
-                }}
-              />
+            {/* Tabs */}
+            <div className="flex items-center gap-4 overflow-x-auto no-scrollbar">
+              {renderStatusTab("PENDING", "Pending", stats.pending)}
+              {renderStatusTab("ALL", "All", stats.all)}
+              {renderStatusTab("APPROVED", "Approve", stats.approved)}
+              {renderStatusTab("REJECTED", "Reject", stats.rejected)}
             </div>
+
+            {(loading || error) && (
+              <div className="mt-2 text-[11px]" style={{ color: "#9B8773" }}>
+                {loading && !requests.length && <span>Loading...</span>}
+                {!loading && error && <span>{error}</span>}
+              </div>
+            )}
           </div>
 
           {/* 列表區域 */}
-          <div className="flex-1 overflow-y-auto">
+          <div ref={desktopListRef} className="flex-1 overflow-y-auto">
             {loading && !requests.length ? (
               <div className="h-full flex items-center justify-center text-xs text-gray-500">
                 Loading...
               </div>
             ) : filteredRequests.length === 0 ? (
-              <div className="p-4 text-xs text-gray-500">
+              <div
+                className="px-4 py-4 text-[12px]"
+                style={{ color: "#9B8773" }}
+              >
                 No VIP requests under this filter.
               </div>
             ) : (
@@ -469,6 +526,7 @@ export function VipRequestsView({
                   req.vipGuest?.preferredName ||
                   req.vipGuest?.fullName ||
                   `VIP ${req.vipNumber || "—"}`;
+
                 const initials = guestName
                   .split(" ")
                   .map((n) => n[0])
@@ -477,6 +535,7 @@ export function VipRequestsView({
                   .slice(0, 2);
 
                 const chip = getStatusChipStyle(req.status);
+                const isActive = activeId === req.id;
 
                 return (
                   <button
@@ -484,13 +543,14 @@ export function VipRequestsView({
                     type="button"
                     onClick={() => handleSelectRequest(req.id)}
                     className={cn(
-                      "w-full px-4 py-3 flex items-center gap-3 text-left transition-colors min-h-[92px]",
-                      activeId === req.id ? "bg-white" : "hover:bg-black/5"
+                      "w-full px-4 flex items-center gap-3 text-left transition-colors",
+                      "h-[76px]",
+                      isActive ? "bg-white" : "hover:bg-black/5"
                     )}
                   >
                     <div className="flex-shrink-0">
                       <div
-                        className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-medium"
+                        className="w-10 h-10 rounded-full flex items-center justify-center text-[12px] font-medium"
                         style={{
                           backgroundColor: "var(--avatar-bg)",
                           color: "var(--accent)",
@@ -501,9 +561,9 @@ export function VipRequestsView({
                     </div>
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center justify-between mb-0.5">
+                      <div className="flex items-center justify-between">
                         <span
-                          className="text-sm font-medium truncate"
+                          className="text-[14px] font-medium truncate"
                           style={{ color: "var(--text-primary)" }}
                         >
                           {guestName}
@@ -512,15 +572,11 @@ export function VipRequestsView({
                           {formatTime(req.createdAt)}
                         </span>
                       </div>
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] text-gray-500 truncate">
-                          {renderChannelLabel(
-                            req.scanChannel
-                          )}{" "}
-                          ·{" "}
-                          {req.vipNumber
-                            ? `VIP ${req.vipNumber}`
-                            : "New Guest"}
+
+                      {/* ⭐ 第二行只展示来源 Channel */}
+                      <div className="mt-1 flex items-center justify-between">
+                        <span className="text-[12px] text-gray-500 truncate">
+                          {renderChannelLabel(req.scanChannel)}
                         </span>
                         <span
                           className={cn(
@@ -543,86 +599,94 @@ export function VipRequestsView({
         <div className="flex-1 flex flex-col">
           {activeRequest ? (
             <>
-              {/* 上半部分內容可滾動 */}
-              <div className="flex-1 overflow-y-auto px-16 pt-8 pb-8">
-                {/* 頂部：名字 + 狀態 + 時間 */}
-                <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-3">
-                    <h2 className="text-lg font-semibold text-[#3a3023]">
-                      {displayName}
-                    </h2>
-                    {statusChip && (
-                      <span
-                        className={cn(
-                          "px-3 py-1 rounded-full text-[10px] font-medium",
-                          statusChip.className
-                        )}
-                      >
-                        {statusChip.label}
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[11px] text-[#9b8773]">
-                    Request Time:{" "}
-                    {formatDateTime(activeRequest.createdAt)}
-                  </div>
-                </div>
-
-                {/* avatar + VIP tag */}
-                <div className="flex flex-col items-center mb-10">
-                  <div
-                    className="w-20 h-20 rounded-full flex items-center justify-center text-xl font-medium mb-3"
-                    style={{ backgroundColor: "#F4E7D4", color: "#7A5A22" }}
-                  >
-                    {(displayName ?? "VIP")
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")
-                      .toUpperCase()
-                      .slice(0, 2)}
-                  </div>
-                  <div className="px-3 py-1 rounded-full text-[11px] font-medium bg-[#F6E4BD] text-[#7A5A22]">
-                    {activeRequest.vipNumber
-                      ? `VIP | ${activeRequest.vipNumber}`
-                      : "New Guest"}
-                  </div>
-                </div>
-
-                {/* Request Info */}
-                <section className="mb-8">
-                  <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
-                    Request Info
-                  </div>
-
-                  <div className="space-y-1.5 text-[13px] text-[#4b3a2b]">
-                    <Row
-                      label="Guest Name"
-                      value={activeRequest.inputPreferredName ?? "—"}
-                    />
-                    <Row
-                      label="Channel"
-                      value={renderChannelLabel(
-                        activeRequest.scanChannel
+              {/* 顶部栏 */}
+              <div
+                className="px-8 py-5 bg-white border-b"
+                style={{ borderBottomColor: "var(--divider)" }}
+              >
+                <div className="flex items-center gap-3">
+                  <h2 className="text-lg font-semibold text-[#3a3023]">
+                    {displayName}
+                  </h2>
+                  {statusChip && (
+                    <span
+                      className={cn(
+                        "px-3 py-1 rounded-md text-[11px] font-medium",
+                        statusChip.className
                       )}
+                    >
+                      {statusChip.label}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* 内容滚动区 */}
+              <div className="flex-1 overflow-y-auto">
+                {/* 中央 avatar + 名字 */}
+                <div className="pt-14 pb-8">
+                  <div className="flex flex-col items-center">
+                    <div
+                      className="w-20 h-20 rounded-full flex items-center justify-center text-2xl font-semibold"
+                      style={{ backgroundColor: "#F4E7D4", color: "#7A5A22" }}
+                    >
+                      {(displayName ?? "VIP")
+                        .split(" ")
+                        .map((n) => n[0])
+                        .join("")
+                        .toUpperCase()
+                        .slice(0, 2) || "?"}
+                    </div>
+                    <div className="mt-4 text-[22px] font-semibold text-[#3a3023]">
+                      {displayName}
+                    </div>
+
+                    <div className="mt-2 px-10 py-2 rounded-md text-[12px] text-[#9b8773] bg-[#F3F2EF]">
+                      {activeRequest.vipNumber
+                        ? `VIP ${activeRequest.vipNumber}`
+                        : "none"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* GUEST DETAIL 表格 */}
+                <div className="px-16">
+                  <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
+                    Guest Detail
+                  </div>
+
+                  {/* ⭐ 桌面表格：Channel / Open ID + Request Time / Decision Time */}
+                  <DetailTable>
+                    <DetailCell
+                      label="Channel"
+                      value={renderChannelLabel(activeRequest.scanChannel)}
                     />
-                    <Row
-                      label="Channel ID"
+                    <DetailCell
+                      label="Open ID"
                       value={activeRequest.inputChannelIdentifier ?? "—"}
                     />
-                    <Row
+                    <DetailCell
                       label="Request Time"
                       value={formatDateTime(activeRequest.createdAt)}
                     />
-                  </div>
-                </section>
+                    <DetailCell
+                      label="Decision Time"
+                      value={getDecisionTimeText(activeRequest)}
+                    />
+                  </DetailTable>
 
-                {/* Remark */}
-                <section className="mt-6">
-                  <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
-                    Remark
+                  {/* NOTE */}
+                  <div className="mt-10 text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
+                    Note
                   </div>
+
                   <textarea
-                    className="w-full min-h-[80px] rounded-lg border border-[#e4d4bd] bg-white px-3 py-2 text-[12px] text-[#4b3a2b] outline-none focus:ring-1 focus:ring-[#d3a65b]"
+                    className="w-full min-h-[84px] rounded-md border bg-white px-4 py-3 text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
+                    style={{
+                      borderColor: "var(--divider)",
+                      // @ts-expect-error: css var
+                      "--tw-ring-color": "var(--accent)",
+                    }}
                     value={remark}
                     onChange={(e) => {
                       const v = e.target.value;
@@ -634,62 +698,62 @@ export function VipRequestsView({
                     }}
                     placeholder="Notes for acceptance / rejection (optional)"
                   />
-                </section>
 
-                {/* 錯誤信息：顯示在內容區底部 */}
-                {error && (
-                  <div className="mt-4 px-3 py-2 text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg">
-                    {error}
-                  </div>
-                )}
-              </div>
-
-              {/* 底部行動按鈕：跟隨詳情區底部 */}
-              <div
-                className="px-16 py-4 border-t bg-white shrink-0"
-                style={{ borderTopColor: "var(--divider)" }}
-              >
-                <div className="flex justify-end gap-4">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      activeRequest && runAction(activeRequest, "REJECT")
-                    }
-                    disabled={
-                      !!activeRequest &&
-                      actionLoadingId === activeRequest.id
-                    }
-                    className="px-8 py-2.5 rounded-full border text-sm font-medium disabled:opacity-60"
-                    style={{
-                      borderColor: "#f97373",
-                      color: "#b91c1c",
-                      backgroundColor: "white",
-                    }}
-                  >
-                    {activeRequest &&
-                    actionLoadingId === activeRequest.id
-                      ? "Processing..."
-                      : "Reject"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      activeRequest && runAction(activeRequest, "APPROVE")
-                    }
-                    disabled={
-                      !!activeRequest &&
-                      actionLoadingId === activeRequest.id
-                    }
-                    className="px-8 py-2.5 rounded-full text-sm font-medium text-white disabled:opacity-60"
-                    style={{ backgroundColor: "#111111" }}
-                  >
-                    {activeRequest &&
-                    actionLoadingId === activeRequest.id
-                      ? "Processing..."
-                      : "Approve"}
-                  </button>
+                  {error && (
+                    <div className="mt-4 px-3 py-2 text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg">
+                      {error}
+                    </div>
+                  )}
                 </div>
+
+                <div className="h-16" />
               </div>
+
+              {/* ✅ 已处理就隐藏按钮条 */}
+              {!isDecided && (
+                <div
+                  className="px-16 py-5 bg-white border-t shrink-0"
+                  style={{ borderTopColor: "var(--divider)" }}
+                >
+                  <div className="flex justify-end gap-6">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        activeRequest && runAction(activeRequest, "REJECT")
+                      }
+                      disabled={
+                        !!activeRequest && actionLoadingId === activeRequest.id
+                      }
+                      className="w-52 h-11 rounded-md border text-[15px] font-medium disabled:opacity-50"
+                      style={{
+                        borderColor: "#f97373",
+                        color: "#b91c1c",
+                        backgroundColor: "white",
+                      }}
+                    >
+                      {!!activeRequest && actionLoadingId === activeRequest.id
+                        ? "Processing..."
+                        : "Reject"}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        activeRequest && runAction(activeRequest, "APPROVE")
+                      }
+                      disabled={
+                        !!activeRequest && actionLoadingId === activeRequest.id
+                      }
+                      className="w-52 h-11 rounded-md text-[15px] font-medium text-white disabled:opacity-50"
+                      style={{ backgroundColor: "#111111" }}
+                    >
+                      {!!activeRequest && actionLoadingId === activeRequest.id
+                        ? "Processing..."
+                        : "Approve"}
+                    </button>
+                  </div>
+                </div>
+              )}
             </>
           ) : (
             <>
@@ -739,18 +803,17 @@ export function VipRequestsView({
                   )}
                 </div>
                 <div className="mt-1 text-[10px] text-[#9b8773]">
-                  Request Time:{" "}
-                  {formatDateTime(activeRequest.createdAt)}
+                  Request Time: {formatDateTime(activeRequest.createdAt)}
                 </div>
               </div>
             </div>
 
-            {/* 內容區：可滾動，底部預留給固定按鈕條 */}
-            <div className="flex-1 overflow-y-auto bg-[#F9F8F6] px-6 pt-6 pb-28">
-              {/* Avatar + VIP tag */}
+            {/* 內容區 */}
+            <div className="flex-1 overflow-y-auto bg-[#FFFFFF] px-4 pt-6 pb-28">
+              {/* 中央 avatar + 名字 */}
               <div className="flex flex-col items-center mb-6">
                 <div
-                  className="w-16 h-16 rounded-full flex items-center justify-center text-lg font-medium mb-3"
+                  className="w-16 h-16 rounded-full flex items-center justify-center text-xl font-semibold mb-3"
                   style={{ backgroundColor: "#F4E7D4", color: "#7A5A22" }}
                 >
                   {(displayName ?? "VIP")
@@ -758,67 +821,66 @@ export function VipRequestsView({
                     .map((n) => n[0])
                     .join("")
                     .toUpperCase()
-                    .slice(0, 2)}
+                    .slice(0, 2) || "?"}
                 </div>
-                <div className="px-3 py-1 rounded-full text-[11px] font-medium bg-[#F6E4BD] text-[#7A5A22]">
+                <div className="text-[18px] font-semibold text-[#3a3023]">
+                  {displayName}
+                </div>
+                <div className="mt-2 px-6 py-2 rounded-md text-[12px] text-[#9b8773] bg-[#F3F2EF]">
                   {activeRequest.vipNumber
-                    ? `VIP | ${activeRequest.vipNumber}`
-                    : "New Guest"}
+                    ? `VIP ${activeRequest.vipNumber}`
+                    : "none"}
                 </div>
               </div>
 
-              {/* Guest Detail / Request Info */}
-              <section className="mb-6">
-                <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
-                  Guest Detail
-                </div>
-                <div className="space-y-1.5 text-[13px] text-[#4b3a2b]">
-                  <Row
-                    label="Channel"
-                    value={renderChannelLabel(activeRequest.scanChannel)}
-                  />
-                  <Row
-                    label="Open ID"
-                    value={activeRequest.inputChannelIdentifier ?? "—"}
-                  />
-                  <Row
-                    label="Nick Name"
-                    value={
-                      activeRequest.inputPreferredName ||
-                      activeRequest.vipGuest?.preferredName ||
-                      activeRequest.vipGuest?.fullName ||
-                      displayName ||
-                      "—"
-                    }
-                  />
-                  <Row
-                    label="Request Time"
-                    value={formatDateTime(activeRequest.createdAt)}
-                  />
-                </div>
-              </section>
+              {/* ✅ Mobile：字段一行一个（Channel/OpenID/Request/Decision） */}
+              <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
+                Guest Detail
+              </div>
 
-              {/* Remark */}
-              <section className="mb-4">
-                <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
-                  Note
-                </div>
-                <textarea
-                  className="w-full min-h-[80px] rounded-lg border border-[#e4d4bd] bg-white px-3 py-2 text-[12px] text-[#4b3a2b] outline-none focus:ring-1 focus:ring-[#d3a65b]"
-                  value={remark}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (!activeRequest) return;
-                    setRemarkById((prev) => ({
-                      ...prev,
-                      [activeRequest.id]: v,
-                    }));
-                  }}
-                  placeholder="Notes for acceptance / rejection (optional)"
+              <MobileDetailList>
+                <MobileDetailRow
+                  label="Channel"
+                  value={renderChannelLabel(activeRequest.scanChannel)}
                 />
-              </section>
+                <MobileDetailRow
+                  label="Open ID"
+                  value={activeRequest.inputChannelIdentifier ?? "—"}
+                />
+                <MobileDetailRow
+                  label="Request Time"
+                  value={formatDateTime(activeRequest.createdAt)}
+                />
+                <MobileDetailRow
+                  label="Decision Time"
+                  value={getDecisionTimeText(activeRequest)}
+                />
+              </MobileDetailList>
 
-              {/* 錯誤信息：在內容區內部顯示 */}
+              {/* Note */}
+              <div className="mt-8 text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
+                Note
+              </div>
+
+              <textarea
+                className="w-full min-h-[84px] rounded-md border bg-white px-4 py-3 text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
+                style={{
+                  borderColor: "var(--divider)",
+                  // @ts-expect-error: css var
+                  "--tw-ring-color": "var(--accent)",
+                }}
+                value={remark}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (!activeRequest) return;
+                  setRemarkById((prev) => ({
+                    ...prev,
+                    [activeRequest.id]: v,
+                  }));
+                }}
+                placeholder="Notes for acceptance / rejection (optional)"
+              />
+
               {error && (
                 <div className="mt-3 px-3 py-2 text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg">
                   {error}
@@ -826,110 +888,116 @@ export function VipRequestsView({
               )}
             </div>
 
-            {/* 底部行動按鈕（手機端固定在視口底部） */}
-            <div
-              className="fixed inset-x-0 bottom-0 z-20 flex gap-3 px-4 py-3 bg-white border-t"
-              style={{ borderTopColor: "var(--divider)" }}
-            >
-              <button
-                type="button"
-                onClick={() =>
-                  activeRequest && runAction(activeRequest, "REJECT")
-                }
-                disabled={
-                  !!activeRequest && actionLoadingId === activeRequest.id
-                }
-                className="flex-1 px-4 py-2.5 rounded-full border text-sm font-medium disabled:opacity-60"
-                style={{
-                  borderColor: "#f97373",
-                  color: "#b91c1c",
-                  backgroundColor: "white",
-                }}
+            {/* ✅ Mobile：已处理就隐藏底部按钮 */}
+            {!isDecided && (
+              <div
+                className="fixed inset-x-0 bottom-0 z-20 flex gap-3 px-4 py-3 bg-white border-t"
+                style={{ borderTopColor: "var(--divider)" }}
               >
-                {activeRequest && actionLoadingId === activeRequest.id
-                  ? "Processing..."
-                  : "Reject"}
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  activeRequest && runAction(activeRequest, "APPROVE")
-                }
-                disabled={
-                  !!activeRequest && actionLoadingId === activeRequest.id
-                }
-                className="flex-1 px-4 py-2.5 rounded-full text-sm font-medium text-white disabled:opacity-60"
-                style={{ backgroundColor: "#111111" }}
-              >
-                {activeRequest && actionLoadingId === activeRequest.id
-                  ? "Processing..."
-                  : "Approve"}
-              </button>
-            </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    activeRequest && runAction(activeRequest, "REJECT")
+                  }
+                  disabled={
+                    !!activeRequest && actionLoadingId === activeRequest.id
+                  }
+                  className="flex-1 h-11 rounded-md border text-[15px] font-medium disabled:opacity-50"
+                  style={{
+                    borderColor: "#f97373",
+                    color: "#b91c1c",
+                    backgroundColor: "white",
+                  }}
+                >
+                  {!!activeRequest && actionLoadingId === activeRequest.id
+                    ? "Processing..."
+                    : "Reject"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    activeRequest && runAction(activeRequest, "APPROVE")
+                  }
+                  disabled={
+                    !!activeRequest && actionLoadingId === activeRequest.id
+                  }
+                  className="flex-1 h-11 rounded-md text-[15px] font-medium text-white disabled:opacity-50"
+                  style={{ backgroundColor: "#111111" }}
+                >
+                  {!!activeRequest && actionLoadingId === activeRequest.id
+                    ? "Processing..."
+                    : "Approve"}
+                </button>
+              </div>
+            )}
           </>
         ) : (
           <>
             {/* 列表視圖（手機） */}
-            <div
-              className="bg-[#F9F8F6] border-b"
-              style={{ borderBottomColor: "var(--divider)" }}
-            >
-              <div className="px-4 pt-4 pb-3">
-                {/* Tabs */}
-                <div className="flex items-center mb-3">
-                  <div className="flex items-center gap-4 overflow-x-auto no-scrollbar">
-                    {renderStatusTab("PENDING", "Pending", stats.pending)}
-                    {renderStatusTab("ALL", "All", stats.all)}
-                    {renderStatusTab("APPROVED", "Approved", stats.approved)}
-                    {renderStatusTab("REJECTED", "Rejected", stats.rejected)}
-                  </div>
-                </div>
+            <div className="p-4" style={{ backgroundColor: "#F9F8F6" }}>
+              {/* 搜索 */}
+              <div className="mb-3">
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search by name or VIP number..."
+                  className="w-full px-4 py-2.5 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-opacity-20"
+                  style={{
+                    backgroundColor: "#FFFFFF",
+                    border: "1px solid var(--divider)",
+                    color: "var(--text-primary)",
+                    // @ts-expect-error: css var
+                    "--tw-ring-color": "var(--accent)",
+                  }}
+                />
+              </div>
 
-                {/* Search */}
-                <div className="mb-2">
-                  <input
-                    type="text"
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search by name or VIP number..."
-                    className="w-full px-3 py-2 rounded-md text-[12px] border bg-white focus:outline-none focus:ring-1"
-                    style={{
-                      borderColor: "var(--divider)",
-                      // @ts-expect-error: css var
-                      "--tw-ring-color": "var(--accent)",
-                    }}
-                  />
-                </div>
+              {/* filter */}
+              <div className="mb-3">
+                <select
+                  className="w-full px-3 py-2.5 rounded-lg text-sm border bg-white focus:outline-none focus:ring-2 focus:ring-opacity-20"
+                  style={{
+                    borderColor: "var(--divider)",
+                    color: "var(--text-primary)",
+                    // @ts-expect-error: css var
+                    "--tw-ring-color": "var(--accent)",
+                  }}
+                  value={channelFilter}
+                  onChange={(e) =>
+                    setChannelFilter(e.target.value as ChannelFilter)
+                  }
+                >
+                  <option value="ALL">All Channel</option>
+                  <option value="wechat">WeChat</option>
+                  <option value="browser">Web</option>
+                </select>
+              </div>
 
-                {/* Channel filter */}
-                <div className="flex items-center gap-2">
-                  <select
-                    className="w-full px-3 py-1.5 rounded-md text-[11px] border bg-white"
-                    style={{
-                      borderColor: "var(--divider)",
-                      color: "#4b3a2b",
-                    }}
-                    value={channelFilter}
-                    onChange={(e) =>
-                      setChannelFilter(e.target.value as ChannelFilter)
-                    }
-                  >
-                    <option value="ALL">All Channel</option>
-                    <option value="wechat">WeChat</option>
-                    <option value="browser">Web</option>
-                  </select>
-                </div>
+              {/* Tabs */}
+              <div className="flex items-center gap-4 overflow-x-auto no-scrollbar">
+                {renderStatusTab("PENDING", "Pending", stats.pending)}
+                {renderStatusTab("ALL", "All", stats.all)}
+                {renderStatusTab("APPROVED", "Approve", stats.approved)}
+                {renderStatusTab("REJECTED", "Reject", stats.rejected)}
               </div>
             </div>
 
             {/* 列表 */}
-            <div className="flex-1 overflow-y-auto bg-[#F9F8F6]">
+            <div
+              ref={mobileListRef}
+              className="flex-1 overflow-y-auto"
+              style={{ backgroundColor: "#F9F8F6" }}
+            >
               {loading && !requests.length ? (
                 <div className="h-full flex items-center justify-center text-xs text-gray-500">
                   Loading...
                 </div>
               ) : filteredRequests.length === 0 ? (
-                <div className="p-4 text-xs text-gray-500">
+                <div
+                  className="px-4 py-4 text-[12px]"
+                  style={{ color: "#9B8773" }}
+                >
                   No VIP requests under this filter.
                 </div>
               ) : (
@@ -939,6 +1007,7 @@ export function VipRequestsView({
                     req.vipGuest?.preferredName ||
                     req.vipGuest?.fullName ||
                     `VIP ${req.vipNumber || "—"}`;
+
                   const initials = guestName
                     .split(" ")
                     .map((n) => n[0])
@@ -947,6 +1016,7 @@ export function VipRequestsView({
                     .slice(0, 2);
 
                   const chip = getStatusChipStyle(req.status);
+                  const isActive = activeId === req.id;
 
                   return (
                     <button
@@ -954,16 +1024,14 @@ export function VipRequestsView({
                       type="button"
                       onClick={() => handleSelectRequest(req.id)}
                       className={cn(
-                        // ✅ 手機列表：高度統一、無分隔線
-                        "w-full px-4 py-3 flex items-center gap-3 text-left transition-colors min-h-[92px]",
-                        activeId === req.id
-                          ? "bg-white"
-                          : "bg-[#F9F8F6] hover:bg-black/5"
+                        "w-full px-4 flex items-center gap-3 text-left transition-colors",
+                        "h-[76px]",
+                        isActive ? "bg-white" : "hover:bg-black/5"
                       )}
                     >
                       <div className="flex-shrink-0">
                         <div
-                          className="w-9 h-9 rounded-full flex items-center justify-center text-[11px] font-medium"
+                          className="w-10 h-10 rounded-full flex items-center justify-center text-[12px] font-medium"
                           style={{
                             backgroundColor: "var(--avatar-bg)",
                             color: "var(--accent)",
@@ -974,9 +1042,9 @@ export function VipRequestsView({
                       </div>
 
                       <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-0.5">
+                        <div className="flex items-center justify-between">
                           <span
-                            className="text-sm font-medium truncate"
+                            className="text-[14px] font-medium truncate"
                             style={{ color: "var(--text-primary)" }}
                           >
                             {guestName}
@@ -985,15 +1053,11 @@ export function VipRequestsView({
                             {formatTime(req.createdAt)}
                           </span>
                         </div>
-                        <div className="flex items-center justify-between">
-                          <span className="text-[11px] text-gray-500 truncate">
-                            {renderChannelLabel(
-                              req.scanChannel
-                            )}{" "}
-                            ·{" "}
-                            {req.vipNumber
-                              ? `VIP ${req.vipNumber}`
-                              : "New Guest"}
+
+                        {/* ⭐ 第二行只展示来源 Channel */}
+                        <div className="mt-1 flex items-center justify-between">
+                          <span className="text-[12px] text-gray-500 truncate">
+                            {renderChannelLabel(req.scanChannel)}
                           </span>
                           <span
                             className={cn(
@@ -1009,13 +1073,13 @@ export function VipRequestsView({
                   );
                 })
               )}
-            </div>
 
-            {error && (
-              <div className="px-4 py-2 text-[11px] text-red-600 bg-red-50 border-t border-red-100">
-                {error}
-              </div>
-            )}
+              {error && (
+                <div className="px-4 py-2 text-[11px] text-red-600 bg-red-50 border-t border-red-100">
+                  {error}
+                </div>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -1023,7 +1087,80 @@ export function VipRequestsView({
   );
 }
 
-// --------- 小行 Row ---------
+/** --------- Desktop 表格 UI（只做展示，不改字段/逻辑） --------- */
+function DetailTable({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="grid grid-cols-4 border rounded-md overflow-hidden"
+      style={{ borderColor: "var(--divider)", backgroundColor: "#FFFFFF" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function DetailCell({ label, value }: { label: string; value?: string | null }) {
+  const display = value && value !== "" ? value : "—";
+  return (
+    <>
+      <div
+        className="px-4 py-3 text-[13px] font-medium border-r border-b"
+        style={{
+          borderColor: "var(--divider)",
+          backgroundColor: "#FAF9F7",
+          color: "#3a3023",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        className="px-4 py-3 text-[13px] border-b"
+        style={{
+          borderColor: "var(--divider)",
+          color: "#3a3023",
+          backgroundColor: "#FFFFFF",
+        }}
+      >
+        {display}
+      </div>
+    </>
+  );
+}
+
+/** --------- Mobile：一行一个字段 --------- */
+function MobileDetailList({ children }: { children: React.ReactNode }) {
+  return (
+    <div
+      className="rounded-md border overflow-hidden bg-white"
+      style={{ borderColor: "var(--divider)" }}
+    >
+      {children}
+    </div>
+  );
+}
+
+function MobileDetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value?: string | null;
+}) {
+  const display = value && value !== "" ? value : "—";
+  return (
+    <div
+      className="flex items-center justify-between px-4 py-3 border-b"
+      style={{ borderBottomColor: "var(--divider)" }}
+    >
+      <span className="text-[12px] font-medium text-[#3a3023]">{label}</span>
+      <span className="text-[12px] text-[#6b5a4a] ml-4 truncate max-w-[60%] text-right">
+        {display}
+      </span>
+    </div>
+  );
+}
+
+// --------- 小行 Row（保留，当前文件里其他地方也可能复用） ---------
 interface RowProps {
   label: string;
   value?: string | null;

@@ -295,12 +295,12 @@ export function ChatPanel({
           </button>
         </div>
 
-        <p
+        {/* <p
           className="text-xs text-center mt-2"
           style={{ color: "var(--text-secondary)" }}
         >
           {t("composer.helperText")}
-        </p>
+        </p> */}
       </div>
     </div>
   );
