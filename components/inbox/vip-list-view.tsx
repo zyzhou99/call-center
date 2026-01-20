@@ -1826,7 +1826,7 @@ function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
             onClick={onClose}
             className="w-full py-3 text-[13px] font-medium"
             style={{
-              backgroundColor: "linear-gradient(200deg, #29221B 73.02%, #3B3833 92.81%)",
+              backgroundColor: "#211C16",
               color: "#FDF3DE",
             }}
           >
@@ -1925,7 +1925,7 @@ function VipQrModal({ open, onClose, entryUrl }: VipQrModalProps) {
           onClick={onClose}
           className="w-full py-3 text-[13px] font-medium"
           style={{
-            backgroundColor: "linear-gradient(200deg, #29221B 73.02%, #3B3833 92.81%)",
+            backgroundColor: "#211C16",
             color: "#FDF3DE",
           }}
         >
