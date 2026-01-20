@@ -347,6 +347,23 @@ function InboxContent() {
           data.sessions || data.conversations || [];
 
         const serverConvs: Conversation[] = rawList.map((c: any) => {
+          // ⭐ 尝试从後端 session 裡讀 lastMsgAt，僅用於 UI 顯示最後時間
+          const lastMsgAtRaw =
+            (c as any).lastMsgAt ??
+            (c as any).lastMessageAt ??
+            (c as any).last_msg_at ??
+            null;
+
+          let lastMsgAt: Date | null = null;
+          if (lastMsgAtRaw instanceof Date) {
+            lastMsgAt = lastMsgAtRaw;
+          } else if (typeof lastMsgAtRaw === "string") {
+            const ts = new Date(lastMsgAtRaw);
+            if (!Number.isNaN(ts.getTime())) {
+              lastMsgAt = ts;
+            }
+          }
+
           const conv: Conversation = {
             id: c.id,
             channel: "wechat",
@@ -368,6 +385,10 @@ function InboxContent() {
           (conv as any).externalUserId = c.externalUserId || c.id;
           (conv as any).vipGuest = c.vipGuest ?? null;
 
+          if (lastMsgAt) {
+            (conv as any).lastMsgAt = lastMsgAt;
+          }
+
           return conv;
         });
 
@@ -386,7 +407,13 @@ function InboxContent() {
           }
         });
 
-        wecomServerUnreadsRef.current = serverUnreads;
+        wecomServerUnreadsRef.current = serverConvs.reduce(
+          (map, conv) => {
+            map[conv.id] = serverUnreads[conv.id] || 0;
+            return map;
+          },
+          {} as Record<string, number>
+        );
         wecomUnreadBaseRef.current = base;
 
         if (typeof window !== "undefined") {
@@ -401,7 +428,8 @@ function InboxContent() {
         }
 
         const convList: Conversation[] = serverConvs.map((conv) => {
-          const rawUnread = serverUnreads[conv.id] || 0;
+          const rawUnread =
+            wecomServerUnreadsRef.current[conv.id] || 0;
           const baseUnread = base[conv.id] || 0;
           const effectiveUnread = Math.max(0, rawUnread - baseUnread);
 
@@ -694,6 +722,66 @@ function InboxContent() {
       return bTimestamp - aTimestamp;
     });
   }, [searchQuery, allConversations, messagesState]);
+
+  // ⭐ 新增：手機端會話列表用的 messagesState（如果還沒拉消息，就用 lastMsgAt 補一條“虛擬消息”讓時間可以顯示）
+  const mobileListMessagesState = useMemo(() => {
+    const merged: Record<string, Message[]> = { ...messagesState };
+
+    const seedFrom: Conversation[] = [
+      ...wecomConversations,
+      ...h5Conversations,
+      ...h5WeChatConversations,
+    ];
+
+    seedFrom.forEach((conv) => {
+      // 只處理 wechat / webchat 兩個 channel
+      if (conv.channel !== "wechat" && conv.channel !== "webchat") return;
+
+      const existing = messagesState[conv.id];
+      if (existing && existing.length > 0) return;
+
+      const rawLast =
+        (conv as any).lastMsgAt ??
+        (conv as any).lastMessageAt ??
+        (conv as any).last_msg_at ??
+        null;
+      if (!rawLast) return;
+
+      let ts: number | null = null;
+      if (rawLast instanceof Date) {
+        ts = rawLast.getTime();
+      } else if (typeof rawLast === "number") {
+        ts = rawLast;
+      } else if (typeof rawLast === "string") {
+        const d = new Date(rawLast);
+        if (!Number.isNaN(d.getTime())) {
+          ts = d.getTime();
+        }
+      }
+      if (!ts) return;
+
+      merged[conv.id] = [
+        {
+          id: `__pseudo_last__${conv.id}`,
+          conversationId: conv.id,
+          direction: "in",
+          text: conv.lastMessagePreview || "",
+          timeLabel: new Date(ts).toLocaleTimeString("en-US", {
+            hour: "numeric",
+            minute: "2-digit",
+          }),
+          timestamp: ts,
+        },
+      ];
+    });
+
+    return merged;
+  }, [
+    messagesState,
+    wecomConversations,
+    h5Conversations,
+    h5WeChatConversations,
+  ]);
 
   // 选会话
   const handleConversationSelect = async (conversationId: string) => {
@@ -1288,7 +1376,7 @@ function InboxContent() {
     "line",
   ];
 
-   // 当前是否有属于当前 channel 的已选会话（PC 右侧是否展示聊天）
+  // 当前是否有属于当前 channel 的已选会话（PC 右侧是否展示聊天）
   const hasActiveConversationInChannel =
     !!activeConversation &&
     activeConversation.channel === activeChannel;
@@ -1320,7 +1408,7 @@ function InboxContent() {
             <button
               type="button"
               onClick={() => setShowVipRequestPopup(false)}
-              className="p-1 rounded-full hover:bg-black/5 flex-shrink-0"
+              className="p-1 rounded-full hover:bg黑/5 flex-shrink-0"
             >
               <CloseIcon
                 className="w-3 h-3"
@@ -1520,7 +1608,7 @@ function InboxContent() {
       <AppShell>
         {/* ⭐ 這裡加上 w-screen / max-w-[100vw]，配合上面的 body hack */}
         <div className="flex-1 flex flex-col overflow-hidden min-h-0 w-screen max-w-[100vw]">
-          <AppHeader />
+          {/* <AppHeader /> */}
 
           {/* 主内容：按 channel 决定是 VIP 视图还是 Chat 视图 */}
           <div className="flex-1 flex flex-col overflow-hidden min-h-0">
@@ -1607,7 +1695,7 @@ function InboxContent() {
                 )}
 
                 {mobileConversationView === "list" ? (
-                  // 👉 会话列表页
+                  // 👉 会话列表页（⭐ 這裡用 mobileListMessagesState，讓最後時間一進列表就有）
                   <div className="flex-1 min-h-0 overflow-y-auto">
                     <ConversationListPanel
                       conversations={visibleConversations}
@@ -1615,7 +1703,7 @@ function InboxContent() {
                       onConversationSelect={handleConversationSelect}
                       searchQuery={searchQuery}
                       onSearchChange={setSearchQuery}
-                      messagesState={messagesState}
+                      messagesState={mobileListMessagesState}
                       searchResults={searchResults}
                       onSearchResultSelect={handleSearchResultSelect}
                     />
@@ -1747,15 +1835,15 @@ function InboxContent() {
                   className="px-5 py-4 border-t flex items-center gap-3"
                   style={{ borderColor: "var(--divider)" }}
                 >
-                  <div className="w-9 h-9 rounded-full bg-[#d1f6ea] flex items-center justify-center text-[13px] font-medium text-[#10624a]">
-                    A
+                  <div className="w-9 h-9 rounded-full bg-[#F4EAD8] flex items-center justify-center text-[13px] font-medium">
+                    JD
                   </div>
                   <div className="flex flex-col">
                     <span
                       className="text-sm"
                       style={{ color: "var(--text-primary)" }}
                     >
-                      Agent
+                      Joye Duan
                     </span>
                     <span className="flex items-center gap-1 text-[11px] text-[#15a36b]">
                       <span className="w-2 h-2 rounded-full bg-[#15a36b]" />
@@ -1786,8 +1874,7 @@ function InboxContent() {
     );
   }
 
-  // 🟢 PC 端：保持你之前的三栏布局完全不变
-    // 🟢 PC 端：三栏布局 + 右侧空态占位
+  // 🟢 PC 端：三栏布局 + 右侧空态占位（不動）
   return (
     <AppShell>
       <LeftChannelRail
@@ -1838,7 +1925,7 @@ function InboxContent() {
                     </>
                   ) : (
                     // ✅ 没有当前 channel 的会话选中时，显示通用空态页面
-                    <div className="flex-1 flex items-center justify-center bg-white">
+                    <div className="flex-1 flex items-center justify-center bg白">
                       <div className="flex flex-col items-center text-center">
                         <div className="w-16 h-16 rounded-full bg-[#f7ecdb] flex items-center justify-center mb-4 shadow-sm">
                           <MessageCircle

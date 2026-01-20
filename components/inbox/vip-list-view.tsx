@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import type React from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { constants } from "node:buffer";
 
 type VipContact = {
   id: string;
@@ -12,6 +13,7 @@ type VipContact = {
   phone?: string;
   isTemp?: boolean;
   remark?: string;
+  createdAt?: string | null; // ✅ 用于展示「用户创建时间」
 
   // 下面这些是从 DB 里同步出来，在中间表单用
   firstName?: string;
@@ -83,6 +85,7 @@ export function VipListView() {
     "history"
   );
   const [mergeSelection, setMergeSelection] = useState<string[]>([]);
+  const [showMergeList, setShowMergeList] = useState(false); // ✅ 控制「展开全部」后的列表展示
 
   // ✅ 手机端 UI 状态（不影响 PC）
   const [isMobile, setIsMobile] = useState(false);
@@ -182,6 +185,15 @@ export function VipListView() {
 
           const qrCode = (g.qrCode as string | undefined) || ""; // ✅ 从后端拿 qrCode
 
+          const createdAtRaw =
+            (g.createdAt as any) ?? (g.created_at as any) ?? null;
+          const createdAt =
+            createdAtRaw instanceof Date
+              ? createdAtRaw.toISOString()
+              : createdAtRaw
+              ? new Date(createdAtRaw).toISOString()
+              : null;
+
           // ✅ 这里尝试从后端拿 sessions，如果暂时没 include，也不会报错，只是空数组
           const sessionsRaw = Array.isArray(g.sessions) ? g.sessions : [];
           const sessions: VipSessionSummary[] = sessionsRaw.map(
@@ -227,6 +239,7 @@ export function VipListView() {
             isTemp: !vipNumber,
             // ✅ remark 优先用 remark，其次 fallback 到 segment/statusLabel
             remark: remarkFromDb || segment || statusLabel || undefined,
+            createdAt,
 
             firstName,
             lastName,
@@ -283,6 +296,7 @@ export function VipListView() {
 
   useEffect(() => {
     setMergeSelection([]);
+    setShowMergeList(false);
   }, [activeId]);
 
   // 同步当前选中联系人 → 中间表单
@@ -687,7 +701,7 @@ export function VipListView() {
           {/* 新建 / 临时码 / 导入导出菜单 */}
           <div className="flex items-center gap-2">
             <button
-              className="flex-1 h-9 rounded-full text-xs font-medium shadow-sm"
+              className="flex-1 h-9 rounded-lg text-xs font-medium shadow-sm"
               style={{
                 backgroundColor: "#111111",
                 color: "#FFFFFF",
@@ -697,11 +711,10 @@ export function VipListView() {
               + 新建联系人
             </button>
             <button
-              className="h-9 px-3 rounded-full text-xs"
+              className="h-9 px-3 rounded-lg text-xs"
               style={{
-                backgroundColor: "#FFF7E8",
-                color: "#7A5A22",
-                border: "1px solid #E5CFA2",
+                backgroundColor: "#F5E0B6",
+                color: "#000000ff",
               }}
               onClick={() => setShowGenericQr(true)}
             >
@@ -709,7 +722,7 @@ export function VipListView() {
             </button>
             <div className="relative">
               <button
-                className="w-9 h-9 rounded-full flex items-center justify-center text-[#9B8773] hover:bg-black/5"
+                className="w-9 h-9 rounded-lg flex items-center justify-center text-[#9B8773] hover:bg-black/5"
                 onClick={() => setShowMenu((v) => !v)}
               >
                 ⋮
@@ -778,24 +791,147 @@ export function VipListView() {
       >
         {activeContact && form ? (
           <>
-                        {/* 顶部标题条：姓名 + VIP badge + 上次对话时间 + Tag 行 */}
+            {isMobile ? (
+            // ====== 手机端 Header ======
             <div
-              className="flex items-start justify-between px-4 md:px-8 pt-6 pb-4 border-b"
+              className="border-b"
+              style={{ borderColor: "var(--divider)" }}
+            >
+              {/* 顶部导航条：返回 + 标题居中 */}
+              <div className="h-12 flex items-center px-4">
+                <button
+                  type="button"
+                  onClick={() => setMobileView("list")}
+                  className="mr-2 flex h-8 w-8 items-center justify-center rounded-full border border-[#E4D4BD]"
+                >
+                  <span className="text-lg text-[#4B3A2B]">‹</span>
+                </button>
+                <div
+                  className="flex-1 text-center text-[15px] font-medium truncate"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {headerName || activeContact.displayName}
+                </div>
+                {/* 占位，用來讓中間標題真正居中 */}
+                <div className="w-8" />
+              </div>
+
+              {/* 主信息块：头像 + 名字 + VIP + 时间 + Tag */}
+              <div className="relative px-6 pt-4 pb-4 flex flex-col items-center">
+                {/* 头像 */}
+                <div
+                  className="w-16 h-16 rounded-full flex items-center justify-center text-[18px] font-medium"
+                  style={{
+                    backgroundColor: "var(--avatar-bg)",
+                    color: "var(--accent)",
+                  }}
+                >
+                  {getInitials(headerName || activeContact.displayName)}
+                </div>
+
+                {/* 姓名 */}
+                <div
+                  className="mt-3 text-[17px] font-semibold"
+                  style={{ color: "var(--text-primary)" }}
+                >
+                  {headerName || activeContact.displayName}
+                </div>
+
+                {/* VIP badge */}
+                {form.vipNumber && (
+                  <div
+                    className="mt-1 inline-flex items-center px-3 py-1 rounded-md text-[11px] font-medium"
+                    style={{
+                      backgroundColor: "#F6E4BD",
+                      color: "#7A5A22",
+                    }}
+                  >
+                    VIP&nbsp;|&nbsp;{form.vipNumber}
+                  </div>
+                )}
+
+                {/* 创建时间 + 上次对话时间 */}
+                <div
+                  className="mt-2 text-[11px]"
+                  style={{ color: "var(--text-secondary)" }}
+                >
+                  创建于&nbsp;
+                  {activeContact.createdAt
+                    ? formatTimeFromIso(activeContact.createdAt)
+                    : "未知"}
+                  &nbsp;·&nbsp;上次对话时间&nbsp;
+                  {historySessions.length > 0 &&
+                  historySessions[0].lastMsgAt
+                    ? formatTimeFromIso(historySessions[0].lastMsgAt)
+                    : "暂无对话记录"}
+                </div>
+
+                {/* Tag 行：左对齐，但整体在 w-full 里 */}
+                <div className="mt-4 w-full flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="px-3 py-1 rounded-md text-[11px] border border-dashed"
+                    style={{
+                      borderColor: "#E1D0B6",
+                      backgroundColor: "#FFF9EF",
+                      color: "#8A7254",
+                    }}
+                    onClick={() => setShowTagModal(true)}
+                  >
+                    + Add Tag
+                  </button>
+
+                  {prefTags.map((tag, idx) => (
+                    <span
+                      key={`pref-${idx}`}
+                      className="px-3 py-1 rounded-md text-[11px]"
+                      style={{
+                        backgroundColor: "#F5E3C7",
+                        color: "#7A5A22",
+                      }}
+                    >
+                      {tag}
+                    </span>
+                  ))}
+
+                  {restrictTags.map((tag, idx) => (
+                    <span
+                      key={`res-${idx}`}
+                      className="px-3 py-1 rounded-md text-[11px]"
+                      style={{
+                        backgroundColor: "#FDE5E5",
+                        color: "#B91C1C",
+                      }}
+                    >
+                      {tag}
+                    </span>
+                  ))}
+                </div>
+
+                {/* 右侧悬浮入口按钮：左侧圆角大，右侧无圆角 */}
+                <button
+                  type="button"
+                  onClick={() => setMobileRightPanelOpen(true)}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 flex items-center justify-center"
+                >
+                  <div
+                    className="w-9 h-16 flex items-center justify-center shadow-md rounded-l-2xl rounded-r-none"
+                    style={{ backgroundColor: "#111111" }}
+                  >
+                    {/* 这里随便用一个简单图标，后面可以换成你喜欢的 */}
+                    <span className="text-white text-xs">≡</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+          ) : (
+            // ====== PC 端 Header（保持左右排版，只稍微减小圆角）======
+            <div
+              className="flex items-start justify-between px-8 pt-6 pb-4 border-b"
               style={{ borderColor: "var(--divider)" }}
             >
               <div className="flex items-start gap-4">
-                {/* 手机端返回按钮 */}
-                {isMobile && (
-                  <button
-                    type="button"
-                    onClick={() => setMobileView("list")}
-                    className="mr-1 flex h-8 w-8 items-center justify-center rounded-full border border-[#e4d4bd]"
-                  >
-                    <span className="text-lg text-[#4b3a2b]">‹</span>
-                  </button>
-                )}
-
-                {/* 头像圆圈 */}
+                {/* avatar */}
                 <div
                   className="w-12 h-12 rounded-full flex items-center justify-center text-[15px] font-medium mt-0.5"
                   style={{
@@ -806,7 +942,6 @@ export function VipListView() {
                   {getInitials(headerName || activeContact.displayName)}
                 </div>
 
-                {/* 姓名 + VIP 信息 + meta 行 + Tag 行 */}
                 <div className="flex flex-col gap-1.5">
                   <div className="flex items-center gap-3">
                     <span
@@ -818,36 +953,38 @@ export function VipListView() {
 
                     {form.vipNumber && (
                       <span
-                        className="px-2 py-0.5 rounded-full text-[11px] font-medium"
+                        className="px-2 py-0.5 rounded-md text-[11px] font-medium"
                         style={{
                           backgroundColor: "#F6E4BD",
                           color: "#7A5A22",
                         }}
                       >
-                          VIP&nbsp;|&nbsp;{form.vipNumber}
+                        VIP&nbsp;|&nbsp;{form.vipNumber}
                       </span>
                     )}
                   </div>
 
-                  {/* 上次对话时间 */}
                   <div
                     className="text-[11px]"
                     style={{ color: "var(--text-secondary)" }}
                   >
-                    上次对话时间&nbsp;
+                    创建于&nbsp;
+                    {activeContact.createdAt
+                      ? formatTimeFromIso(activeContact.createdAt)
+                      : "未知"}
+                    &nbsp;·&nbsp;上次对话时间&nbsp;
                     {historySessions.length > 0 &&
                     historySessions[0].lastMsgAt
                       ? formatTimeFromIso(historySessions[0].lastMsgAt)
                       : "暂无对话记录"}
                   </div>
 
-                  {/* Tag 行：紧贴在上次对话时间下面 */}
                   <div className="flex flex-wrap gap-2 mt-2">
                     <button
                       type="button"
-                      className="px-3 py-1 rounded-full text-[11px]"
+                      className="px-3 py-1 rounded-md text-[11px] border border-dashed"
                       style={{
-                        border: "1px dashed #E1D0B6",
+                        borderColor: "#E1D0B6",
                         backgroundColor: "#FFF9EF",
                         color: "#8A7254",
                       }}
@@ -858,8 +995,8 @@ export function VipListView() {
 
                     {prefTags.map((tag, idx) => (
                       <span
-                        key={`pref-${idx}`}
-                        className="px-3 py-1 rounded-full text-[11px]"
+                        key={`pref-desktop-${idx}`}
+                        className="px-3 py-1 rounded-md text-[11px]"
                         style={{
                           backgroundColor: "#F5E3C7",
                           color: "#7A5A22",
@@ -871,8 +1008,8 @@ export function VipListView() {
 
                     {restrictTags.map((tag, idx) => (
                       <span
-                        key={`res-${idx}`}
-                        className="px-3 py-1 rounded-full text-[11px]"
+                        key={`res-desktop-${idx}`}
+                        className="px-3 py-1 rounded-md text-[11px]"
                         style={{
                           backgroundColor: "#FDE5E5",
                           color: "#B91C1C",
@@ -885,6 +1022,7 @@ export function VipListView() {
                 </div>
               </div>
             </div>
+          )}
 
             {/* 内容 + 底部操作条 */}
             <div className="flex-1 flex flex-col min-h-0">
@@ -901,15 +1039,9 @@ export function VipListView() {
 
                   {entryUrl ? (
                     <>
-                      {/* <div
-                        className="text-[11px]"
-                        style={{ color: "var(--text-secondary)" }}
-                      >
-                        已为该客人生成专属入口，可点击下方按钮查看二维码及访问链接。
-                      </div> */}
                       <button
                         type="button"
-                        className="inline-flex items-center justify-center px-4 py-2 mt-2 rounded-full text-[12px] font-medium"
+                        className="inline-flex items-center justify-center px-4 py-2 mt-2 rounded-lg text-[12px] font-medium"
                         style={{
                           backgroundColor: "#F5E0B6",
                           color: "#000000ff",
@@ -1021,9 +1153,9 @@ export function VipListView() {
                 </div>
               </div>
 
-              {/* 底部固定操作条：删除联系人 + 更新资料（逻辑不变） */}
+              {/* 底部固定操作条：删除联系人 + 更新资料（逻辑不变，只改排版和圆角） */}
               <div
-                className="px-4 md:px-8 py-4 border-t flex items-center justify-around"
+                className="px-4 md:px-8 py-4 border-t flex items-center justify-end gap-6"
                 style={{
                   borderColor: "var(--divider)",
                   backgroundColor: "#FFFFFF",
@@ -1032,7 +1164,7 @@ export function VipListView() {
                 <button
                   type="button"
                   onClick={handleDelete}
-                  className="px-5 py-2 rounded-full text-[13px] font-medium"
+                  className="px-5 py-2 rounded-md text-[13px] font-medium"
                   style={{
                     backgroundColor: "#FFFFFF",
                     color: "#B91C1C",
@@ -1049,7 +1181,7 @@ export function VipListView() {
                       disabled={!canSave}
                       onClick={handleSave}
                       className={cn(
-                        "px-6 py-2.5 rounded-full text-[13px] font-medium text-white disabled:opacity-60 disabled:cursor-not-allowed"
+                        "px-6 py-2.5 rounded-md text-[13px] font-medium text-white disabled:opacity-60 disabled:cursor-not-allowed"
                       )}
                       style={{ backgroundColor: "#111111" }}
                     >
@@ -1120,22 +1252,6 @@ export function VipListView() {
         />
       )}
 
-      {/* Mobile：悬浮入口按钮（历史记录 / 备注 / 合并） */}
-      {isMobile && activeContact && mobileView === "detail" && (
-        <button
-          type="button"
-          onClick={() => setMobileRightPanelOpen(true)}
-          className="fixed right-2 top-20 z-40 flex h-8 w-8 items-center justify-center rounded-full shadow-lg"
-          style={{ backgroundColor: "#111111" }}
-        >
-          <div className="flex flex-col items-center gap-[2px]">
-            <span className="block h-[2px] w-3 rounded-full bg-[#FDF3DE]" />
-            <span className="block h-[2px] w-4 rounded-full bg-[#FDF3DE]" />
-            <span className="block h-[2px] w-3 rounded-full bg-[#FDF3DE]" />
-          </div>
-        </button>
-      )}
-
       {/* 右侧 panel：历史记录 / 备注 / 合并 */}
       <div
         className={cn(
@@ -1162,49 +1278,51 @@ export function VipListView() {
           className="px-4 pt-4 pb-2 border-b"
           style={{ borderColor: "var(--divider)" }}
         >
-          <div className="flex items-center gap-4 text-[12px]">
-            <button
-              className="pb-1 border-b-2"
-              style={{
-                borderColor:
-                  rightTab === "history" ? "#F0C88C" : "transparent",
-                color:
-                  rightTab === "history"
-                    ? "var(--text-primary)"
-                    : "var(--text-secondary)",
-              }}
-              onClick={() => setRightTab("history")}
-            >
-              历史记录
-            </button>
-            <button
-              className="pb-1 border-b-2"
-              style={{
-                borderColor:
-                  rightTab === "remark" ? "#F0C88C" : "transparent",
-                color:
-                  rightTab === "remark"
-                    ? "var(--text-primary)"
-                    : "var(--text-secondary)",
-              }}
-              onClick={() => setRightTab("remark")}
-            >
-              备注
-            </button>
-            <button
-              className="pb-1 border-b-2"
-              style={{
-                borderColor:
-                  rightTab === "merge" ? "#F0C88C" : "transparent",
-                color:
-                  rightTab === "merge"
-                    ? "var(--text-primary)"
-                    : "var(--text-secondary)",
-              }}
-              onClick={() => setRightTab("merge")}
-            >
-              合并
-            </button>
+          <div className="flex items-center">
+            <div className="flex w-full bg-[#F9F8F6] rounded-lg p-1 text-[12px]">
+              <button
+                className="flex-1 px-3 py-1.5 rounded-md font-medium text-center"
+                style={{
+                  backgroundColor:
+                    rightTab === "history" ? "#FFFFFF" : "transparent",
+                  color:
+                    rightTab === "history"
+                      ? "var(--text-primary)"
+                      : "var(--text-secondary)",
+                }}
+                onClick={() => setRightTab("history")}
+              >
+                历史记录
+              </button>
+              <button
+                className="flex-1 px-3 py-1.5 rounded-md font-medium text-center"
+                style={{
+                  backgroundColor:
+                    rightTab === "remark" ? "#FFFFFF" : "transparent",
+                  color:
+                    rightTab === "remark"
+                      ? "var(--text-primary)"
+                      : "var(--text-secondary)",
+                }}
+                onClick={() => setRightTab("remark")}
+              >
+                备注
+              </button>
+              <button
+                className="flex-1 px-3 py-1.5 rounded-md font-medium text-center"
+                style={{
+                  backgroundColor:
+                    rightTab === "merge" ? "#FFFFFF" : "transparent",
+                  color:
+                    rightTab === "merge"
+                      ? "var(--text-primary)"
+                      : "var(--text-secondary)",
+                }}
+                onClick={() => setRightTab("merge")}
+              >
+                合并
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1232,15 +1350,6 @@ export function VipListView() {
                       }
                     />
                   ))}
-                  {/* <button
-                    className="mt-3 text-[12px]"
-                    style={{ color: "#DAB76E" }}
-                    onClick={() =>
-                      alert("后续可以跳转到 Inbox 里过滤该 VIP 的全部对话。")
-                    }
-                  >
-                    查看更多历史对话
-                  </button> */}
                 </>
               )}
             </>
@@ -1343,87 +1452,102 @@ export function VipListView() {
                   当前没有可合并的其他联系人。
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {mergeCandidates.map((c) => {
-                    const checked = mergeSelection.includes(c.id);
-                    const sameVip =
-                      !!c.vipNumber &&
-                      !!activeContact?.vipNumber &&
-                      c.vipNumber === activeContact.vipNumber;
+                <div className="space-y-3">
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-lg text-[11px] self-start"
+                    style={{
+                      backgroundColor: "#F9F8F6",
+                      color: "#7A5A22",
+                      border: "1px solid #E4D4BD",
+                    }}
+                    onClick={() =>
+                      setShowMergeList((prev) => !prev)
+                    }
+                  >
+                    {showMergeList
+                      ? "收起可合并联系人"
+                      : `展开全部可合并联系人（${mergeCandidates.length}）`}
+                  </button>
 
-                    return (
-                      <label
-                        key={c.id}
-                        className="flex items-start gap-2 p-2 rounded-md cursor-pointer hover:bg-black/5"
-                      >
-                        <input
-                          type="checkbox"
-                          className="mt-[3px]"
-                          checked={checked}
-                          onChange={() => {
-                            setMergeSelection((prev) =>
-                              checked
-                                ? prev.filter((id) => id !== c.id)
-                                : [...prev, c.id]
-                            );
-                          }}
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div
-                            className="flex items-center gap-2 text-[12px]"
-                            style={{ color: "var(--text-primary)" }}
+                  {showMergeList && (
+                    <div className="space-y-2">
+                      {mergeCandidates.map((c) => {
+                        const checked = mergeSelection.includes(c.id);
+                        const sameVip =
+                          !!c.vipNumber &&
+                          !!activeContact?.vipNumber &&
+                          c.vipNumber === activeContact.vipNumber;
+
+                        return (
+                          <label
+                            key={c.id}
+                            className="flex items-start gap-2 p-2 rounded-md cursor-pointer hover:bg-black/5"
                           >
-                            <span className="truncate">
-                              {c.displayName}
-                            </span>
-                            {c.vipNumber && (
-                              <span
-                                className="px-1.5 py-0.5 rounded-full text-[10px]"
-                                style={{
-                                  backgroundColor: "#F3E7D3",
-                                  color: "#7A5A22",
-                                }}
+                            <input
+                              type="radio"
+                              name="merge-target"
+                              className="mt-[3px]"
+                              checked={checked}
+                              onChange={() => {
+                                setMergeSelection(
+                                  checked ? [] : [c.id]
+                                );
+                              }}
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div
+                                className="flex items-center gap-2 text-[12px]"
+                                style={{ color: "var(--text-primary)" }}
                               >
-                                VIP {c.vipNumber}
-                              </span>
-                            )}
-                            {sameVip && (
-                              <span
-                                className="px-1.5 py-0.5 rounded-full text-[10px]"
-                                style={{
-                                  backgroundColor: "#DCFCE7",
-                                  color: "#166534",
-                                }}
+                                <span className="truncate">
+                                  {c.displayName}
+                                </span>
+                                {c.vipNumber && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded-full text-[10px]"
+                                    style={{
+                                      backgroundColor: "#F6E4BD",
+                                      color: "#7A5B22",
+                                    }}
+                                  >
+                                    VIP {c.vipNumber}
+                                  </span>
+                                )}
+                                {sameVip && (
+                                  <span
+                                    className="px-1.5 py-0.5 rounded-full text-[10px]"
+                                    style={{
+                                      backgroundColor: "#DCFCE7",
+                                      color: "#166534",
+                                    }}
+                                  >
+                                    同一 VIP 号
+                                  </span>
+                                )}
+                              </div>
+                              <div
+                                className="text-[11px] mt-0.5 truncate"
+                                style={{ color: "var(--text-secondary)" }}
                               >
-                                同一 VIP 号
-                              </span>
-                            )}
-                          </div>
-                          <div
-                            className="text-[11px] mt-0.5 truncate"
-                            style={{ color: "var(--text-secondary)" }}
-                          >
-                            {c.phone
-                              ? maskPhone(c.phone)
-                              : "未填写手机号"}
-                          </div>
-                        </div>
-                      </label>
-                    );
-                  })}
+                                {c.phone
+                                  ? maskPhone(c.phone)
+                                  : "未填写手机号"}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               )}
 
               <button
                 type="button"
                 disabled={mergeSelection.length === 0}
-                onClick={() =>
-                  alert(
-                    "这里先做 UI POC，实际合并逻辑（会话、档案合并）我们下一步再接后端。"
-                  )
-                }
                 className={cn(
-                  "mt-2 px-4 py-2 rounded-full text-[12px] font-medium disabled:opacity-60 disabled:cursor-not-allowed text-white"
+                  "mt-2 px-4 py-2 rounded-lg text-[12px] font-medium disabled:opacity-60 disabled:cursor-not-allowed text-white"
                 )}
                 style={{ backgroundColor: "#111111" }}
               >
@@ -1491,8 +1615,8 @@ function VipContactRow({ contact, isActive, onClick }: VipContactRowProps) {
               <span
                 className="inline-block px-1.5 py-0.5 text-[10px] font-medium rounded"
                 style={{
-                  backgroundColor: "var(--divider)",
-                  color: "var(--text-secondary)",
+                  backgroundColor: "#F6E4BD",
+                  color: "#7A5B22",
                 }}
               >
                 VIP {contact.vipNumber}
@@ -1506,10 +1630,8 @@ function VipContactRow({ contact, isActive, onClick }: VipContactRowProps) {
             className="text-sm truncate"
             style={{ color: "var(--text-secondary)" }}
           >
-            {/* ✅ 优先展示备注，没有备注再显示手机号 */}
-            {contact.remark
-              ? contact.remark
-              : contact.phone
+            {/* ✅ 统一只展示手机号，没有手机号则提示「未填写手机号」 */}
+            {contact.phone
               ? maskPhone(contact.phone)
               : "未填写手机号"}
           </p>
@@ -1629,13 +1751,13 @@ function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
       className="fixed inset-0 z-40 flex items-center justify-center"
       style={{ backgroundColor: "rgba(0,0,0,0.35)" }}
     >
-      <div className="w-[360px] rounded-3xl overflow-hidden shadow-2xl">
+      <div className="w-[320px] rounded-3xl overflow-hidden shadow-2xl">
         {/* 上半部分：金色卡片（跟专属二维码统一风格） */}
         <div
           className="px-6 pt-6 pb-5 text-center relative"
           style={{
             background:
-              "linear-gradient(180deg, #F6E4BD 0%, #F3D09C 45%, #F1C48B 100%)",
+              "linear-gradient(151deg, #F9EBBE 0.78%, #E7D3AC 56.83%, #D6BB9A 89.1%)",
           }}
         >
           {/* 右上角关闭按钮 */}
@@ -1690,7 +1812,7 @@ function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
           </div>
 
           <div
-            className="mt-4 text-[10px] break-all px-3 py-2 rounded-md bg-white/70"
+            className="mt-4 text-[8px] break-all px-3 py-2 rounded-md"
             style={{ color: "#7A5A22" }}
           >
             {entryUrl}
@@ -1701,26 +1823,14 @@ function GenericQrModal({ open, onClose, entryUrl }: GenericQrModalProps) {
         <div className="flex">
           <button
             type="button"
-            onClick={handleCopy}
-            className="flex-1 py-3 text-[13px] font-medium border-r"
-            style={{
-              backgroundColor: "#3C2A1A",
-              color: "#FDF3DE",
-              borderColor: "#2B1D11",
-            }}
-          >
-            复制链接
-          </button>
-          <button
-            type="button"
             onClick={onClose}
-            className="flex-1 py-3 text-[13px] font-medium"
+            className="w-full py-3 text-[13px] font-medium"
             style={{
-              backgroundColor: "#2B1D11",
+              backgroundColor: "linear-gradient(200deg, #29221B 73.02%, #3B3833 92.81%)",
               color: "#FDF3DE",
             }}
           >
-            关闭
+            保存二维码
           </button>
         </div>
       </div>
@@ -1748,7 +1858,7 @@ function VipQrModal({ open, onClose, entryUrl }: VipQrModalProps) {
           className="px-6 pt-6 pb-5 text-center relative"
           style={{
             background:
-              "linear-gradient(180deg, #F6E4BD 0%, #F3D09C 45%, #F1C48B 100%)",
+              "linear-gradient(151deg, #F9EBBE 0.78%, #E7D3AC 56.83%, #D6BB9A 89.1%)",
           }}
         >
           {/* 右上角关闭按钮 */}
@@ -1802,7 +1912,7 @@ function VipQrModal({ open, onClose, entryUrl }: VipQrModalProps) {
           </div>
 
           <div
-            className="mt-4 text-[10px] break-all px-3 py-2 rounded-md bg-white/70"
+            className="mt-4 text-[10px] break-all px-3 py-2 rounded-md bg白/70"
             style={{ color: "#7A5A22" }}
           >
             {entryUrl}
@@ -1815,7 +1925,7 @@ function VipQrModal({ open, onClose, entryUrl }: VipQrModalProps) {
           onClick={onClose}
           className="w-full py-3 text-[13px] font-medium"
           style={{
-            backgroundColor: "#3C2A1A",
+            backgroundColor: "linear-gradient(200deg, #29221B 73.02%, #3B3833 92.81%)",
             color: "#FDF3DE",
           }}
         >

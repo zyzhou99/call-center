@@ -32,6 +32,7 @@ export async function GET(_req: NextRequest) {
             channel: true,
             lastMsgAt: true,
             lastMsgPreview: true,
+            createdAt: true,
           },
         },
       },
@@ -86,6 +87,7 @@ export async function GET(_req: NextRequest) {
         restriction: g.restriction,
         remark: (((g.remark as string | undefined) || "") as string).trim(),
         qrCode: g.qrCode,
+        createdAt: g.createdAt.toISOString(),
         updatedAt: g.updatedAt.toISOString(),
 
         // ✅ 右侧「历史记录」用的 session 摘要

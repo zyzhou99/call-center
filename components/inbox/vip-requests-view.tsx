@@ -580,7 +580,7 @@ export function VipRequestsView({
                         </span>
                         <span
                           className={cn(
-                            "ml-2 px-2 py-0.5 rounded-full text-[9px] font-medium flex-shrink-0",
+                            "ml-2 px-2 py-0.5 rounded-md text-[9px] font-medium flex-shrink-0",
                             chip.className
                           )}
                         >
