@@ -32,13 +32,16 @@ interface VipRequestItem {
   inputChannelIdentifier?: string | null;
   nicknameFromChannel?: string | null;
 
-  // ⭐ 後端 PendingApproval.reason，當作客服備註使用
+  // ⭐ 後端 PendingApproval.reason，當作客服備註使用（目前 UI 不再編輯，只保留）
   reason?: string | null;
 
   vipGuest?: VipGuestLite | null;
 
   // ⭐ 决策时间（后端如果有 updatedAt 就会带上）
   updatedAt?: string | null;
+
+  // ⭐ 新增：PendingApproval.inputPhoneNumber（後端已有）
+  inputPhoneNumber?: string | null;
 }
 
 interface VipApprovalsApiResponse {
@@ -109,7 +112,7 @@ const getStatusChipStyle = (status: VipRequestStatus) => {
   }
 };
 
-// ⭐ Decision Time 展示用：逻辑只在 UI 层
+// ⭐ Decision Time 展示用：現在 UI 不再用，但邏輯先保留
 const getDecisionTimeText = (req?: VipRequestItem | null) => {
   if (!req) return "—";
   if (req.status === "PENDING") return "Pending";
@@ -132,8 +135,16 @@ export function VipRequestsView({
   const [actionLoadingId, setActionLoadingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // ⭐ 每一條 request 的備註
+  // ⭐ 已存在：每一條 request 的備註（現在 UI 不再輸入，只用來讀後端歷史 reason）
   const [remarkById, setRemarkById] = useState<Record<string, string>>({});
+
+  // ⭐ 新增：每條 request 的 Preferred Name / VIP Number 編輯值
+  const [editPreferredNameById, setEditPreferredNameById] = useState<
+    Record<string, string>
+  >({});
+  const [editVipNumberById, setEditVipNumberById] = useState<
+    Record<string, string>
+  >({});
 
   // ⭐ 手機端列表 / 詳情視圖切換，只影響 < md
   const [mobileView, setMobileView] = useState<"list" | "detail">("list");
@@ -323,23 +334,52 @@ export function VipRequestsView({
     return requests.find((r) => r.id === activeId) ?? null;
   }, [requests, activeId]);
 
-  // 當前這條 request 對應的備註內容
+  // 當前這條 request 對應的備註內容（現在 UI 不再編輯，只用來保留原數據）
   const remark =
     activeRequest && remarkById[activeRequest.id]
       ? remarkById[activeRequest.id]
       : "";
 
+  // ⭐ 當前條目的 Preferred Name / VIP Number 編輯值（帶 fallback）
+  const activePreferredNameInput =
+    activeRequest && activeRequest.id
+      ? editPreferredNameById[activeRequest.id] ??
+        activeRequest.inputPreferredName ??
+        activeRequest.vipGuest?.preferredName ??
+        ""
+      : "";
+
+  const activeVipNumberInput =
+    activeRequest && activeRequest.id
+      ? editVipNumberById[activeRequest.id] ?? activeRequest.vipNumber ?? ""
+      : "";
+
   // ------- actions -------
 
-  const runAction = async (
+    const runAction = async (
     request: VipRequestItem,
     action: "APPROVE" | "REJECT"
   ) => {
     setActionLoadingId(request.id);
     setError(null);
 
-    // 取這條 request 對應的備註
+    // 舊的備註（目前不再在 UI 編輯，只保留給後端兼容）
     const currentRemark = remarkById[request.id] ?? "";
+
+    // ⭐ 準備這條 request 的最終 Preferred Name / VIP Number
+    const finalPreferredName = (
+      editPreferredNameById[request.id] ??
+      request.inputPreferredName ??
+      request.vipGuest?.preferredName ??
+      ""
+    ).trim();
+
+    const finalVipNumber = (
+      editVipNumberById[request.id] ?? request.vipNumber ?? ""
+    ).trim();
+
+    // ⭐ 手機號暫時不在這裡編輯，就用 PendingApproval 上的 inputPhoneNumber
+    const finalPhoneNumber = (request.inputPhoneNumber ?? "").trim();
 
     try {
       const res = await fetch(
@@ -349,8 +389,12 @@ export function VipRequestsView({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             action,
-            // 把備註傳給後端，後端用 PendingApproval.reason 存起來
+            // 保留原來的 reason 傳遞（若為空就不寫）
             reason: currentRemark || undefined,
+            // ✅ 用我們後端新加的三個字段名字
+            inputVipNumber: finalVipNumber || undefined,
+            inputPreferredName: finalPreferredName || undefined,
+            inputPhoneNumber: finalPhoneNumber || undefined,
           }),
         }
       );
@@ -359,7 +403,34 @@ export function VipRequestsView({
         throw new Error(data?.error ?? "ACTION_FAILED");
       }
 
-      // 完成後刷新列表，會觸發上面的 useEffect 自動跳到下一條 PENDING
+      // ⭐ 如果是 APPROVE：跳轉到 vip-list-view 裡對應用戶
+      if (action === "APPROVE") {
+        const vipToOpen =
+          finalVipNumber ||
+          request.vipNumber ||
+          (request.vipGuest?.fullName ?? "");
+
+        try {
+          // 讓 Inbox 重載後直接切到 vipContacts
+          if (typeof window !== "undefined") {
+            window.localStorage.setItem("cc_active_channel", "vipContacts");
+          }
+        } catch {
+          // 忽略 localStorage 異常
+        }
+
+        if (typeof window !== "undefined") {
+          const params = new URLSearchParams();
+          if (vipToOpen) {
+            params.set("vipNumber", vipToOpen);
+          }
+          const qs = params.toString();
+          window.location.href = qs ? `/inbox?${qs}` : "/inbox";
+          return; // 不再留在當前頁面
+        }
+      }
+
+      // ⭐ 其他情況（例如 REJECT）：仍然刷新列表
       await refresh();
     } catch (e) {
       console.error("update approval failed:", e);
@@ -374,6 +445,15 @@ export function VipRequestsView({
     if (scanChannel === "wechat") return "WeChat";
     if (scanChannel === "browser") return "Web";
     return scanChannel;
+  };
+
+  const getPhoneLabelValue = (req: VipRequestItem | null) => {
+    if (!req) return "—";
+    // 優先用 inputPhoneNumber（來自 PendingApproval）
+    if (req.inputPhoneNumber && req.inputPhoneNumber.trim()) {
+      return req.inputPhoneNumber.trim();
+    }
+    return "—";
   };
 
   // ⭐ Tabs：选中时文字变深+底下金色横线
@@ -545,7 +625,7 @@ export function VipRequestsView({
                     className={cn(
                       "w-full px-4 flex items-center gap-3 text-left transition-colors",
                       "h-[76px]",
-                      isActive ? "bg-white" : "hover:bg-black/5"
+                      isActive ? "bg-white" : "hover:bg:black/5 hover:bg-black/5"
                     )}
                   >
                     <div className="flex-shrink-0">
@@ -652,52 +732,83 @@ export function VipRequestsView({
                 {/* GUEST DETAIL 表格 */}
                 <div className="px-16">
                   <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
-                    Guest Detail
+                    Request Detail
                   </div>
 
-                  {/* ⭐ 桌面表格：Channel / Open ID + Request Time / Decision Time */}
+                  {/* ⭐ 桌面表格：Channel / Phone Number / Open ID / Request Time */}
                   <DetailTable>
                     <DetailCell
                       label="Channel"
                       value={renderChannelLabel(activeRequest.scanChannel)}
                     />
                     <DetailCell
-                      label="Open ID"
+                      label="Phone Number"
+                      value={getPhoneLabelValue(activeRequest)}
+                    />
+                    <DetailCell
+                      label="Channel Identifier"
                       value={activeRequest.inputChannelIdentifier ?? "—"}
                     />
                     <DetailCell
                       label="Request Time"
                       value={formatDateTime(activeRequest.createdAt)}
                     />
-                    <DetailCell
-                      label="Decision Time"
-                      value={getDecisionTimeText(activeRequest)}
-                    />
                   </DetailTable>
 
-                  {/* NOTE */}
+                  {/* ⭐ 新區塊：讓客服填 Preferred Name / VIP Number */}
                   <div className="mt-10 text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
-                    Note
+                    VIP Info
                   </div>
 
-                  <textarea
-                    className="w-full min-h-[84px] rounded-md border bg-white px-4 py-3 text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
-                    style={{
-                      borderColor: "var(--divider)",
-                      // @ts-expect-error: css var
-                      "--tw-ring-color": "var(--accent)",
-                    }}
-                    value={remark}
-                    onChange={(e) => {
-                      const v = e.target.value;
-                      if (!activeRequest) return;
-                      setRemarkById((prev) => ({
-                        ...prev,
-                        [activeRequest.id]: v,
-                      }));
-                    }}
-                    placeholder="Notes for acceptance / rejection (optional)"
-                  />
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-40 text-[12px] text-[#9b8773]">
+                        Preferred Name
+                      </div>
+                      <input
+                        className="flex-1 px-4 py-2.5 rounded-md border bg-white text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
+                        style={{
+                          borderColor: "var(--divider)",
+                          // @ts-expect-error: css var
+                          "--tw-ring-color": "var(--accent)",
+                        }}
+                        value={activePreferredNameInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (!activeRequest) return;
+                          setEditPreferredNameById((prev) => ({
+                            ...prev,
+                            [activeRequest.id]: v,
+                          }));
+                        }}
+                        placeholder="e.g. Joye"
+                      />
+                    </div>
+
+                    <div className="flex items-center gap-4">
+                      <div className="w-40 text-[12px] text-[#9b8773]">
+                        VIP Number
+                      </div>
+                      <input
+                        className="flex-1 px-4 py-2.5 rounded-md border bg-white text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
+                        style={{
+                          borderColor: "var(--divider)",
+                          // @ts-expect-error: css var
+                          "--tw-ring-color": "var(--accent)",
+                        }}
+                        value={activeVipNumberInput}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (!activeRequest) return;
+                          setEditVipNumberById((prev) => ({
+                            ...prev,
+                            [activeRequest.id]: v,
+                          }));
+                        }}
+                        placeholder="e.g. 10001"
+                      />
+                    </div>
+                  </div>
 
                   {error && (
                     <div className="mt-4 px-3 py-2 text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg">
@@ -833,7 +944,7 @@ export function VipRequestsView({
                 </div>
               </div>
 
-              {/* ✅ Mobile：字段一行一个（Channel/OpenID/Request/Decision） */}
+              {/* ✅ Mobile：字段一行一个（Channel / Phone / Channel Id / Request Time） */}
               <div className="text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
                 Guest Detail
               </div>
@@ -844,42 +955,73 @@ export function VipRequestsView({
                   value={renderChannelLabel(activeRequest.scanChannel)}
                 />
                 <MobileDetailRow
-                  label="Open ID"
+                  label="Phone Number"
+                  value={getPhoneLabelValue(activeRequest)}
+                />
+                <MobileDetailRow
+                  label="Channel Identifier"
                   value={activeRequest.inputChannelIdentifier ?? "—"}
                 />
                 <MobileDetailRow
                   label="Request Time"
                   value={formatDateTime(activeRequest.createdAt)}
                 />
-                <MobileDetailRow
-                  label="Decision Time"
-                  value={getDecisionTimeText(activeRequest)}
-                />
               </MobileDetailList>
 
-              {/* Note */}
+              {/* ⭐ Mobile：Preferred Name / VIP Number 編輯 */}
               <div className="mt-8 text-[11px] font-semibold tracking-[0.18em] text-[#b28a4a] uppercase mb-3">
-                Note
+                VIP Info (for confirmation)
               </div>
 
-              <textarea
-                className="w-full min-h-[84px] rounded-md border bg-white px-4 py-3 text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
-                style={{
-                  borderColor: "var(--divider)",
-                  // @ts-expect-error: css var
-                  "--tw-ring-color": "var(--accent)",
-                }}
-                value={remark}
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (!activeRequest) return;
-                  setRemarkById((prev) => ({
-                    ...prev,
-                    [activeRequest.id]: v,
-                  }));
-                }}
-                placeholder="Notes for acceptance / rejection (optional)"
-              />
+              <div className="space-y-4">
+                <div className="flex flex-col gap-1">
+                  <span className="text-[12px] text-[#9b8773]">
+                    Preferred Name
+                  </span>
+                  <input
+                    className="w-full px-4 py-2.5 rounded-md border bg-white text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
+                    style={{
+                      borderColor: "var(--divider)",
+                      // @ts-expect-error: css var
+                      "--tw-ring-color": "var(--accent)",
+                    }}
+                    value={activePreferredNameInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!activeRequest) return;
+                      setEditPreferredNameById((prev) => ({
+                        ...prev,
+                        [activeRequest.id]: v,
+                      }));
+                    }}
+                    placeholder="e.g. Joye"
+                  />
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <span className="text-[12px] text-[#9b8773]">
+                    VIP Number
+                  </span>
+                  <input
+                    className="w-full px-4 py-2.5 rounded-md border bg-white text-[13px] text-[#3a3023] outline-none focus:ring-2 focus:ring-opacity-20"
+                    style={{
+                      borderColor: "var(--divider)",
+                      // @ts-expect-error: css var
+                      "--tw-ring-color": "var(--accent)",
+                    }}
+                    value={activeVipNumberInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (!activeRequest) return;
+                      setEditVipNumberById((prev) => ({
+                        ...prev,
+                        [activeRequest.id]: v,
+                      }));
+                    }}
+                    placeholder="e.g. 10001"
+                  />
+                </div>
+              </div>
 
               {error && (
                 <div className="mt-3 px-3 py-2 text-[11px] text-red-600 bg-red-50 border border-red-100 rounded-lg">

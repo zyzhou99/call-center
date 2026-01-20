@@ -68,10 +68,6 @@ export async function GET(_req: Request, { params }: RouteParams) {
       );
     }
 
-    // 這裡不再做自動補建 Session 的 fallback，
-    // Session / sessionId 的創建統一放在 POST(審批通過) 裡面做，
-    // 這樣邏輯單一也更好查。
-
     return NextResponse.json(
       {
         ok: true,
@@ -108,6 +104,12 @@ export async function GET(_req: Request, { params }: RouteParams) {
  * { action: "APPROVE" }
  * { action: "REJECT", reason?: string }
  * 也兼容 { status: "APPROVED" | "REJECTED" | "EXPIRED" }
+ *
+ * ✅ 新增：支持
+ * - inputVipNumber
+ * - inputPreferredName
+ * - inputPhoneNumber
+ * 這三個字段，從前端 request detail 確認後傳入。
  */
 export async function POST(req: Request, { params }: RouteParams) {
   try {
@@ -132,6 +134,22 @@ export async function POST(req: Request, { params }: RouteParams) {
       typeof body?.agentId === "string" && body.agentId.trim()
         ? body.agentId.trim()
         : null;
+
+    // ✅ 新增：前端傳來的最終確認值
+    const inputVipNumberFromBody: string =
+      typeof body?.inputVipNumber === "string" && body.inputVipNumber.trim()
+        ? body.inputVipNumber.trim()
+        : "";
+    const inputPreferredNameFromBody: string =
+      typeof body?.inputPreferredName === "string" &&
+      body.inputPreferredName.trim()
+        ? body.inputPreferredName.trim()
+        : "";
+    const inputPhoneNumberFromBody: string =
+      typeof body?.inputPhoneNumber === "string" &&
+      body.inputPhoneNumber.trim()
+        ? body.inputPhoneNumber.trim()
+        : "";
 
     // 兼容 action / status 兩種寫法
     if (!action && statusInput) {
@@ -191,9 +209,21 @@ export async function POST(req: Request, { params }: RouteParams) {
         where: { id },
         data: {
           status: nextStatus,
-          reason: nextStatus === "REJECTED" ? reason : null,
+          // REJECT / EXPIRED 也保留 reason
+          reason: nextStatus === "REJECTED" ? reason : reason,
           assignedAgentId: agentId ?? "demo-agent",
           assignedAt: now,
+          // 順便把前端確認的值同步一下（可選）
+          vipNumber:
+            inputVipNumberFromBody || existing.vipNumber || undefined,
+          inputPreferredName:
+            inputPreferredNameFromBody ||
+            existing.inputPreferredName ||
+            undefined,
+          inputPhoneNumber:
+            inputPhoneNumberFromBody ||
+            existing.inputPhoneNumber ||
+            undefined,
         },
         include: {
           vipGuest: {
@@ -232,95 +262,95 @@ export async function POST(req: Request, { params }: RouteParams) {
     // 下面是 APPROVED 的處理邏輯
     // ===========================
 
-    // 先準備一些“可變”的本地變量，之後可以根據是否已有 VIP 來覆蓋
+    // 最終要寫回去的幾個值（先組一份“候選值”）
     let vipGuestIdToUse = existing.vipGuestId as string | null;
-    let vipNumberToUse = existing.vipNumber as string | null;
-    let preferredNameToUse: string | null =
-      (existing.inputPreferredName &&
-        existing.inputPreferredName.trim()) ||
-      existing.vipGuest?.preferredName ||
-      existing.vipGuest?.fullName ||
+
+    let vipNumberToUse: string | null =
+      inputVipNumberFromBody ||
+      existing.vipNumber ||
       null;
 
-    // --------- 新邏輯：如果還沒有 VIP，就幫他創一個“Guest_xxxx” ---------
-    if (!vipGuestIdToUse || !vipNumberToUse) {
-      // 隨機 4 位數後綴，例如 2930
+    let preferredNameToUse: string | null =
+      inputPreferredNameFromBody ||
+      (existing.inputPreferredName?.trim() || "") ||
+      (existing.vipGuest?.preferredName?.trim() || "") ||
+      (existing.vipGuest?.fullName?.trim() || "") ||
+      null;
+
+    let phoneNumberToUse: string | null =
+      inputPhoneNumberFromBody ||
+      (existing.inputPhoneNumber?.trim() || "") ||
+      null;
+
+    // 兜底一下 vipNumber
+    if (!vipNumberToUse) {
       const suffix = Math.floor(Math.random() * 10000)
         .toString()
         .padStart(4, "0");
-
-      // 顯示名：Guest_2930
-      const generatedGuestName =
-        preferredNameToUse && preferredNameToUse.length > 0
-          ? preferredNameToUse
-          : `Guest_${suffix}`;
-
-      // 隨機 VIP 號：例如 20 + 4 位 = 20008
-      const generatedVipNumber = `20${suffix}`;
-
-      // 創建一條新的 VipGuest
-      const newVipGuest = await prisma.vipGuest.create({
-        data: {
-          vipNumber: generatedVipNumber,
-          fullName: generatedGuestName,
-          preferredName: generatedGuestName,
-        },
-      });
-
-      vipGuestIdToUse = newVipGuest.id;
-      vipNumberToUse = newVipGuest.vipNumber;
-      preferredNameToUse =
-        newVipGuest.preferredName || generatedGuestName;
-
-      // 把 PendingApproval 裡也補齊這些信息（方便後面列表顯示）
-      await prisma.pendingApproval.update({
-        where: { id },
-        data: {
-          vipGuestId: vipGuestIdToUse,
-          vipNumber: vipNumberToUse,
-          // 如果之前沒有輸入 preferredName，就順便用 Guest_xxxx 填上
-          inputPreferredName:
-            existing.inputPreferredName &&
-            existing.inputPreferredName.trim()
-              ? existing.inputPreferredName
-              : generatedGuestName,
-        },
-      });
+      vipNumberToUse = `20${suffix}`;
     }
 
-    // 這裡 vipGuestIdToUse / vipNumberToUse 理論上已經都有值了
-    const safeVipNumber = vipNumberToUse || "0000";
-
-    // 如果這次審批單上有客人輸入的 preferredName，
-    // 優先同步到 VipGuest.preferredName，
-    // 這樣會話列表 / 歡迎語 / VIP Profile 都用這個名字。
-    if (
-      vipGuestIdToUse &&
-      typeof existing.inputPreferredName === "string" &&
-      existing.inputPreferredName.trim()
-    ) {
-      const newPreferred = existing.inputPreferredName.trim();
-
+    // --------- 有已有 VipGuest：更新它 ---------
+    if (vipGuestIdToUse && existing.vipGuest) {
       try {
-        await prisma.vipGuest.update({
+        const updatedGuest = await prisma.vipGuest.update({
           where: { id: vipGuestIdToUse },
-          data: { preferredName: newPreferred },
+          data: {
+            vipNumber: vipNumberToUse,
+            preferredName: preferredNameToUse || undefined,
+            // 如果原來沒有 fullName，就用這次確認的 preferredName 當作 fullName
+            fullName:
+              existing.vipGuest.fullName ||
+              preferredNameToUse ||
+              undefined,
+            contactPhone: phoneNumberToUse || undefined,
+          },
         });
-        console.log("[vipApproval] updated vipGuest.preferredName", {
-          vipGuestId: vipGuestIdToUse,
-          preferredName: newPreferred,
-        });
-        preferredNameToUse = newPreferred;
+
+        vipGuestIdToUse = updatedGuest.id;
+        vipNumberToUse = updatedGuest.vipNumber;
+        preferredNameToUse =
+          updatedGuest.preferredName || preferredNameToUse;
       } catch (e) {
         console.error(
-          "[vipApproval] failed to update vipGuest.preferredName",
+          "[vipApproval] failed to update existing VipGuest",
           e
         );
       }
     }
 
-        // --------- 把這次審批填的備註，同步寫到 VipGuest.notes ---------
-    // （只在 APPROVED 分支裡，REJECT 不會寫入 VIP）
+    // --------- 還沒有 VipGuest：創一個新的 ---------
+    if (!vipGuestIdToUse) {
+      const suffix = Math.floor(Math.random() * 10000)
+        .toString()
+        .padStart(4, "0");
+
+      const baseName =
+        preferredNameToUse ||
+        (existing.inputDisplayName?.trim() || "") ||
+        `Guest_${suffix}`;
+
+      try {
+        const newVipGuest = await prisma.vipGuest.create({
+          data: {
+            vipNumber: vipNumberToUse!,
+            fullName: baseName,
+            preferredName: preferredNameToUse || baseName,
+            contactPhone: phoneNumberToUse || undefined,
+          },
+        });
+
+        vipGuestIdToUse = newVipGuest.id;
+        vipNumberToUse = newVipGuest.vipNumber;
+        preferredNameToUse = newVipGuest.preferredName;
+      } catch (e) {
+        console.error("[vipApproval] failed to create VipGuest", e);
+      }
+    }
+
+    const safeVipNumber = vipNumberToUse || "0000";
+
+    // --------- 把這次審批的備註，同步寫到 VipGuest.remark ---------
     if (vipGuestIdToUse && reason) {
       try {
         await prisma.vipGuest.update({
@@ -340,22 +370,16 @@ export async function POST(req: Request, { params }: RouteParams) {
       }
     }
 
+    // --------- H5 / WeCom 不同入口的會話處理 ---------
 
-    // --------- 情況二：APPROVED，要為 H5 / WeCom 做不同處理 ---------
-
-    // 先沿用 DB 裡已有的值（理論上大多數情況都是 null）
     let sessionIdToUse: string | null = existing.sessionId ?? null;
     let kfUrlToUse: string | null = existing.kfUrl ?? null;
 
     // ✅ H5 入口（mode=h5）：
-    // 為 H5/webchat／wechat 建 Session + 歡迎語
     if (existing.entryMode === "h5") {
-      // 根據 scanChannel 判斷是「微信掃碼的 H5」還是「瀏覽器掃碼的 H5」
       const scanChannel = existing.scanChannel || "browser";
       const isWeChatScan = scanChannel === "wechat";
 
-      // - 瀏覽器掃碼：openKfid = H5_OPENKFID, channel = "webchat"（出現在 Webchat tab）
-      // - 微信掃碼：  openKfid = WECOM_OPENKFID, channel = "wechat"（出現在 WeChat tab）
       const openKfid = isWeChatScan ? WECOM_OPENKFID : H5_OPENKFID;
       const channel = isWeChatScan ? "wechat" : "webchat";
 
@@ -377,7 +401,6 @@ export async function POST(req: Request, { params }: RouteParams) {
         vipNumber: safeVipNumber,
       });
 
-      // upsert Session（同一個 browserId/openid 多次掃碼命中同一會話）
       const session = await prisma.session.upsert({
         where: {
           openKfid_externalUserId: {
@@ -393,6 +416,7 @@ export async function POST(req: Request, { params }: RouteParams) {
           lastMsgAt: now,
           lastMsgPreview: welcomeText,
           channelIdentifier: existing.inputChannelIdentifier ?? null,
+          phoneNumber: phoneNumberToUse || undefined,
         },
         create: {
           openKfid,
@@ -404,12 +428,12 @@ export async function POST(req: Request, { params }: RouteParams) {
           lastMsgAt: now,
           lastMsgPreview: welcomeText,
           channelIdentifier: existing.inputChannelIdentifier ?? null,
+          phoneNumber: phoneNumberToUse || undefined,
         },
       });
 
       sessionIdToUse = session.id;
 
-      // 寫一條系統歡迎語到 Message
       await prisma.message.create({
         data: {
           msgId: `vip-welcome-${session.id}-${now.getTime()}`,
@@ -431,12 +455,10 @@ export async function POST(req: Request, { params }: RouteParams) {
       });
     }
 
-    // ✅ WeCom / hybrid + 微信 掃碼的入口（entryMode === "wecom"）：
-    // 審批通過後，直接設置企業微信客服鏈接，讓 /vip-pending 跳過去。
+    // ✅ WeCom / hybrid + 微信 掃碼入口（entryMode === "wecom"）
     if (existing.entryMode === "wecom") {
       kfUrlToUse = WECOM_FIXED_KF_URL;
 
-      // 把這個 VIP 掛到當前 openKfid（企業微信客服賬號）上
       if (vipGuestIdToUse && vipNumberToUse) {
         setPendingVipBinding(
           WECOM_OPENKFID,
@@ -454,17 +476,28 @@ export async function POST(req: Request, { params }: RouteParams) {
       }
     }
 
-    // 4) 回填 PendingApproval 的狀態 & sessionId / kfUrl
+    // 4) 回填 PendingApproval 的狀態 & 基本欄位
     const updated = await prisma.pendingApproval.update({
       where: { id },
       data: {
         status: nextStatus,
-        // ⭐ 不管 APPROVED / REJECTED，都把備註寫進 reason
         reason,
         assignedAgentId: agentId ?? "demo-agent",
         assignedAt: now,
         sessionId: sessionIdToUse,
         kfUrl: kfUrlToUse,
+        vipGuestId: vipGuestIdToUse ?? existing.vipGuestId,
+        vipNumber: vipNumberToUse ?? existing.vipNumber,
+        inputPreferredName:
+          inputPreferredNameFromBody ||
+          preferredNameToUse ||
+          existing.inputPreferredName ||
+          undefined,
+        inputPhoneNumber:
+          inputPhoneNumberFromBody ||
+          phoneNumberToUse ||
+          existing.inputPhoneNumber ||
+          undefined,
       },
       include: {
         vipGuest: {
