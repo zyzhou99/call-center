@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState, useRef } from "react";
 import type React from "react";
 import { Search } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { constants } from "node:buffer";
 
 type VipContact = {
   id: string;
