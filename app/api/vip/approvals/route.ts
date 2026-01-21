@@ -73,6 +73,7 @@ export async function GET(req: Request) {
           inputPreferredName: a.inputPreferredName,
           inputBirthdayMd: a.inputBirthdayMd,
           inputChannelIdentifier: a.inputChannelIdentifier,
+          inputPhoneNumber: a.inputPhoneNumber,
 
           vipGuest: a.vipGuest
             ? {

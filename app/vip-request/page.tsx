@@ -14,6 +14,13 @@ interface SubmitResponse {
   error?: string;
 }
 
+function getQueryParam(name: string) {
+  if (typeof window === "undefined") return null;
+  const sp = new URLSearchParams(window.location.search);
+  const v = sp.get(name);
+  return v && v.trim() ? v.trim() : null;
+}
+
 export default function VipRequestPage() {
   const router = useRouter();
 
@@ -66,6 +73,8 @@ export default function VipRequestPage() {
       setStatus("SUBMITTING");
       setMessage("Sending your request to our concierge…");
 
+      const inputPhoneNumber = getQueryParam("phone");
+
       try {
         // 3) 呼叫後端：這裡只傳 scanChannel + channelIdentifier
         const res = await fetch("/api/vip/submit", {
@@ -74,6 +83,7 @@ export default function VipRequestPage() {
           body: JSON.stringify({
             scanChannel,
             channelIdentifier,
+            inputPhoneNumber: inputPhoneNumber || undefined,
           }),
         });
 

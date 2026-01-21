@@ -9,6 +9,7 @@ import { prisma } from "@/lib/db";
 interface SubmitBody {
   scanChannel?: string;       // "wechat" | "browser"
   channelIdentifier?: string; // browserId / wxh5:xxx 等
+  inputPhoneNumber?: string;
 }
 
 // 小工具：把 scanChannel 正規化成 "wechat" | "browser"
@@ -47,6 +48,13 @@ export async function POST(req: Request) {
       );
     }
 
+    // ⭐ 可选手机号：只保留数字和 +
+    const rawPhone = body.inputPhoneNumber;
+    const inputPhoneNumber =
+      typeof rawPhone === "string" && rawPhone.trim()
+        ? rawPhone.trim().replace(/[^\d+]/g, "")
+        : null;
+
     // 生成一個隨機 Guest 名，例如 Guest_2930
     const { code, label } = generateGuestLabel();
 
@@ -67,6 +75,8 @@ export async function POST(req: Request) {
 
         // 渠道唯一 ID：瀏覽器 = browserId、微信 = wxh5:xxx
         inputChannelIdentifier: channelIdentifier,
+
+        inputPhoneNumber,
 
         // 固定用 h5 版本
         version: "h5",
