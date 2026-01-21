@@ -631,9 +631,7 @@ export function VipListView() {
   // ✅ 当前联系人专属 entry 链接，用来生成二维码
   const entryUrl =
     origin && activeContact && activeContact.qrCode
-      ? `${origin}/vip-entry?qrCode=${encodeURIComponent(
-          activeContact.qrCode
-        )}`
+      ? `${origin}/q?mode=vip&qrCode=${encodeURIComponent(activeContact.qrCode)}`
       : null;
 
   return (
@@ -645,7 +643,7 @@ export function VipListView() {
         <GenericQrModal
           open={showGenericQr}
           onClose={() => setShowGenericQr(false)}
-          entryUrl={`${origin}/vip-request`}
+          entryUrl={`${origin}/q?mode=general`}
         />
       )}
       {entryUrl && (
