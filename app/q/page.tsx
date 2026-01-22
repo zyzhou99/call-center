@@ -1,8 +1,10 @@
 // app/q/page.tsx
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import Image from "next/image";
+import vipLogin from "@/assets/vip-login1.png";
 
 function isWeChat() {
   if (typeof navigator === "undefined") return false;
@@ -36,9 +38,12 @@ function buildMiniAppUrl(base: string, scene: string) {
 export default function QEntryPage() {
   const sp = useSearchParams();
 
-  const mode = (sp.get("mode") || "general").toLowerCase(); // vip / general
+  const rawMode = sp.get("mode"); // ✅ 判断URL里是否真的带了 mode
+  const mode = (rawMode || "general").toLowerCase();
   const qrCode = sp.get("qrCode") || "";
   const token = sp.get("token") || qrCode; // 兼容老逻辑：没有 token 就用 qrCode 顶上
+
+  const [showHostHint, setShowHostHint] = useState(false);
 
   // 给小程序用的 scene（你小程序端拿到 scene 后自己 parse）
   const scene = useMemo(() => {
@@ -50,6 +55,28 @@ export default function QEntryPage() {
   }, [mode, qrCode, token]);
 
   useEffect(() => {
+    // ✅ 10 秒后还没跳转，就提示找 Host
+    const t = window.setTimeout(() => setShowHostHint(true), 10000);
+
+    const hasTokenOrQr = Boolean(
+      (qrCode && qrCode.trim()) || (token && token.trim())
+    );
+
+    // ✅ 规则：
+    // - vip：必须有 token/qrCode 才跳
+    // - general：只要 URL 明确写了 ?mode=general 就跳（不需要 token）
+    // - 裸 /q：rawMode=null 且没 token/qrCode → 不跳
+    if (mode === "vip" && !hasTokenOrQr) {
+      console.warn("[/q] vip mode but missing qrCode/token, skip redirect.");
+      return () => window.clearTimeout(t);
+    }
+    if (mode !== "vip" && !hasTokenOrQr && rawMode !== "general") {
+      console.warn(
+        "[/q] missing params and no explicit mode=general, skip redirect."
+      );
+      return () => window.clearTimeout(t);
+    }
+
     // 1) 微信内 → 跳小程序
     if (isWeChat()) {
       const miniBase = process.env.NEXT_PUBLIC_MINIAPP_URL_LINK || "";
@@ -57,13 +84,11 @@ export default function QEntryPage() {
 
       if (miniUrl) {
         window.location.replace(miniUrl);
-        return;
+        return () => window.clearTimeout(t);
       }
 
-      // 如果你还没配 NEXT_PUBLIC_MINIAPP_URL_LINK，就先别 404，给个兜底
-      // （你一配好 env，再刷新就会跳小程序）
       console.warn("NEXT_PUBLIC_MINIAPP_URL_LINK is missing.");
-      return;
+      return () => window.clearTimeout(t);
     }
 
     // 2) 非微信（相机 / 浏览器）→ 走 H5
@@ -74,39 +99,62 @@ export default function QEntryPage() {
       if (qrCode) p.set("qrCode", qrCode);
       if (token) p.set("token", token);
       window.location.replace(`/vip-entry?${p.toString()}`);
-      return;
+      return () => window.clearTimeout(t);
     }
 
     // 通用码 → /vip-request
     {
       const p = new URLSearchParams();
       p.set("mode", "general");
-      // 通用码如果你还需要透传别的参数，也可以加在这里
       window.location.replace(`/vip-request?${p.toString()}`);
     }
-  }, [mode, qrCode, token, scene]);
 
-  // 页面上展示一个“正在跳转”，避免白屏
+    return () => window.clearTimeout(t);
+  }, [mode, rawMode, qrCode, token, scene]);
+
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontFamily:
-          '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial',
-        padding: 24,
-      }}
-    >
-      <div style={{ textAlign: "center", maxWidth: 420 }}>
-        <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
-          正在跳转…
+    <div className="min-h-screen flex justify-center bg-[#FFF9F0]">
+      <div className="w-full max-w-md flex flex-col bg-[#FFF9F0]">
+        {/* 顶部头图 */}
+        <div className="relative w-full">
+          <div className="relative w-full h-[260px] overflow-hidden">
+            <Image
+              src={vipLogin}
+              alt="VIP"
+              fill
+              priority
+              className="object-cover object-bottom"
+            />
+          </div>
         </div>
-        <div style={{ fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>
-          如果你是在微信里打开但没有跳转到小程序，请检查是否已配置：
-          <br />
-          <code>NEXT_PUBLIC_MINIAPP_URL_LINK</code>
+
+        {/* 中间文字（保持原文案不变） */}
+        <div className="flex-1 flex items-center justify-center px-7 pt-8 pb-12">
+          <div
+            style={{
+              textAlign: "center",
+              maxWidth: 420,
+              fontFamily:
+                '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial',
+            }}
+          >
+            <div style={{ fontSize: 16, fontWeight: 600, marginBottom: 8 }}>
+              正在跳转…
+            </div>
+
+            {showHostHint && (
+              <div
+                style={{
+                  marginTop: 10,
+                  fontSize: 12,
+                  color: "#7b6246",
+                  lineHeight: 1.6,
+                }}
+              >
+                未检测到有效的二维码参数。请联系您的接待人员（Host）获取可用的二维码后重新扫码进入。
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
